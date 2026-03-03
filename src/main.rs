@@ -37,6 +37,8 @@ enum Commands {
 struct Config {
     search_root: String,
     default_command: String,
+    #[serde(default)]
+    include_root: bool,
 }
 
 impl Default for Config {
@@ -44,6 +46,7 @@ impl Default for Config {
         Self {
             search_root: DEFAULT_SEARCH_ROOT.to_string(),
             default_command: DEFAULT_COMMAND.to_string(),
+            include_root: false,
         }
     }
 }
@@ -71,7 +74,11 @@ fn run(cli: Cli) -> Result<(), String> {
         let old_config = config.clone();
 
         if search_root.is_none() && default_command.is_none() {
-            config_ui::interactive_config(&mut config.search_root, &mut config.default_command)?;
+            config_ui::interactive_config(
+                &mut config.search_root,
+                &mut config.default_command,
+                &mut config.include_root,
+            )?;
         } else {
             if let Some(value) = search_root {
                 config.search_root = value;
@@ -90,7 +97,7 @@ fn run(cli: Cli) -> Result<(), String> {
         return Ok(());
     }
 
-    let selected_dir = select_directory(&expand_home(&config.search_root))?;
+    let selected_dir = select_directory(&expand_home(&config.search_root), config.include_root)?;
     let Some(selected_dir) = selected_dir else {
         return Ok(());
     };
@@ -107,11 +114,11 @@ fn run(cli: Cli) -> Result<(), String> {
     }
 }
 
-fn select_directory(search_root: &str) -> Result<Option<PathBuf>, String> {
-    fzf_select_directory(search_root)
+fn select_directory(search_root: &str, include_root: bool) -> Result<Option<PathBuf>, String> {
+    fzf_select_directory(search_root, include_root)
 }
 
-fn fzf_select_directory(search_root: &str) -> Result<Option<PathBuf>, String> {
+fn fzf_select_directory(search_root: &str, include_root: bool) -> Result<Option<PathBuf>, String> {
     let mut fd_child = Command::new("fd")
         .arg("--type")
         .arg("directory")
@@ -151,7 +158,10 @@ fn fzf_select_directory(search_root: &str) -> Result<Option<PathBuf>, String> {
             .stdin
             .take()
             .ok_or("Failed to capture fzf stdin")?;
-        writeln!(fzf_stdin, "{search_root}").map_err(|e| format!("Failed writing to fzf: {e}"))?;
+        if include_root {
+            let root = absolute_root_path(search_root)?;
+            writeln!(fzf_stdin, "{root}").map_err(|e| format!("Failed writing root option to fzf: {e}"))?;
+        }
 
         let mut fd_stdout = fd_stdout;
         io::copy(&mut fd_stdout, &mut fzf_stdin)
@@ -188,12 +198,26 @@ fn fzf_select_directory(search_root: &str) -> Result<Option<PathBuf>, String> {
         return Err("fzf terminated by signal".to_string());
     }
 
-    let selected = selection.trim();
-    if selected.is_empty() {
-        return Ok(None);
+    Ok(parse_selection(&selection))
+}
+
+fn absolute_root_path(search_root: &str) -> Result<String, String> {
+    let root = PathBuf::from(search_root);
+    if root.is_absolute() {
+        return Ok(root.to_string_lossy().into_owned());
     }
 
-    Ok(Some(PathBuf::from(selected)))
+    let cwd = env::current_dir().map_err(|e| format!("Failed to read current directory: {e}"))?;
+    Ok(cwd.join(root).to_string_lossy().into_owned())
+}
+
+fn parse_selection(selection: &str) -> Option<PathBuf> {
+    let selected = selection.trim();
+    if selected.is_empty() {
+        return None;
+    }
+
+    Some(PathBuf::from(selected))
 }
 
 fn ensure_dependencies() -> Result<(), String> {
@@ -272,9 +296,12 @@ fn expand_home(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_and_load_config, write_config, Config, DEFAULT_COMMAND, DEFAULT_SEARCH_ROOT};
+    use super::{
+        absolute_root_path, ensure_and_load_config, parse_selection, write_config, Config,
+        DEFAULT_COMMAND, DEFAULT_SEARCH_ROOT,
+    };
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -312,6 +339,7 @@ mod tests {
 
         assert_eq!(cfg.search_root, DEFAULT_SEARCH_ROOT);
         assert_eq!(cfg.default_command, DEFAULT_COMMAND);
+        assert!(!cfg.include_root);
         assert!(config_path.exists());
     }
 
@@ -322,6 +350,7 @@ mod tests {
         let expected = Config {
             search_root: "/home/regueiro".to_string(),
             default_command: "qwen".to_string(),
+            include_root: true,
         };
 
         write_config(&config_path, &expected).expect("write config should succeed");
@@ -339,5 +368,49 @@ mod tests {
 
         let err = ensure_and_load_config(&config_path).expect_err("invalid TOML should fail");
         assert!(err.contains("Failed parsing config"));
+    }
+
+    #[test]
+    fn ensure_and_load_config_defaults_include_root_when_missing() {
+        let dir = TestDir::new();
+        let config_path = dir.path.join("config.toml");
+        fs::write(
+            &config_path,
+            "search_root = \"/home/regueiro\"\ndefault_command = \"qwen\"\n",
+        )
+        .expect("failed to write config without include_root");
+
+        let cfg = ensure_and_load_config(&config_path).expect("load config should succeed");
+        assert!(!cfg.include_root);
+    }
+
+    #[test]
+    fn parse_selection_handles_root_path() {
+        let parsed = parse_selection("/home/regueiro\n").expect("should parse root");
+        assert_eq!(parsed, PathBuf::from("/home/regueiro"));
+    }
+
+    #[test]
+    fn parse_selection_handles_regular_path() {
+        let parsed = parse_selection("/home/regueiro/project\n").expect("should parse path");
+        assert_eq!(parsed, PathBuf::from("/home/regueiro/project"));
+    }
+
+    #[test]
+    fn parse_selection_ignores_empty_input() {
+        assert_eq!(parse_selection("  \n"), None);
+    }
+
+    #[test]
+    fn absolute_root_path_keeps_absolute_paths() {
+        let root = absolute_root_path("/tmp").expect("should resolve absolute path");
+        assert_eq!(root, "/tmp");
+    }
+
+    #[test]
+    fn absolute_root_path_resolves_relative_paths() {
+        let root = absolute_root_path("relative-root").expect("should resolve relative path");
+        assert!(Path::new(&root).is_absolute());
+        assert!(root.ends_with("relative-root"));
     }
 }
