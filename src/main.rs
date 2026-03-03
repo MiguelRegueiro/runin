@@ -214,7 +214,7 @@ fn ensure_dependencies() -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "Missing required dependency(s): {}. Install them and retry.",
+            "Missing required dependencies: {}.\nInstall `fd` and `fzf`, and ensure both are available in PATH.",
             missing.join(", ")
         ))
     }
