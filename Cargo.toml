@@ -3,6 +3,9 @@ name = "runin"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+description = "Minimal CLI utility for selecting a project directory with fd/fzf and running a command within it."
+repository = "https://github.com/MiguelRegueiro/runin"
+homepage = "https://github.com/MiguelRegueiro/runin"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
