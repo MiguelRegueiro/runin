@@ -4,6 +4,7 @@ pub fn interactive_config(
     search_root: &mut String,
     default_command: &mut String,
     include_root: &mut bool,
+    include_hidden: &mut bool,
 ) -> Result<(), String> {
     clear_if_corrupt(search_root);
     clear_if_corrupt(default_command);
@@ -19,6 +20,9 @@ pub fn interactive_config(
     }
     if let Some(value) = prompt_include_root(*include_root)? {
         *include_root = value;
+    }
+    if let Some(value) = prompt_include_hidden(*include_hidden)? {
+        *include_hidden = value;
     }
 
     Ok(())
@@ -81,6 +85,31 @@ fn prompt_include_root(current: bool) -> Result<Option<bool>, String> {
 }
 
 fn normalize_include_root_input(raw: &str) -> Result<Option<bool>, ()> {
+    normalize_toggle_input(raw)
+}
+
+fn prompt_include_hidden(current: bool) -> Result<Option<bool>, String> {
+    let current_label = if current { "y" } else { "n" };
+    loop {
+        println!("Include hidden paths [{current_label}]:");
+        print!("> ");
+        io::stdout()
+            .flush()
+            .map_err(|e| format!("Failed flushing stdout: {e}"))?;
+
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| format!("Failed reading Include hidden paths: {e}"))?;
+
+        match normalize_toggle_input(input.trim()) {
+            Ok(value) => return Ok(value),
+            Err(()) => println!("Please enter y, n, or press Enter to keep current."),
+        }
+    }
+}
+
+fn normalize_toggle_input(raw: &str) -> Result<Option<bool>, ()> {
     if raw.is_empty() {
         return Ok(None);
     }
@@ -94,7 +123,9 @@ fn normalize_include_root_input(raw: &str) -> Result<Option<bool>, ()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{clear_if_corrupt, normalize_include_root_input, normalize_input};
+    use super::{
+        clear_if_corrupt, normalize_include_root_input, normalize_input, normalize_toggle_input,
+    };
 
     #[test]
     fn clear_if_corrupt_clears_when_control_chars_present() {
@@ -145,5 +176,11 @@ mod tests {
     #[test]
     fn normalize_include_root_input_rejects_invalid() {
         assert_eq!(normalize_include_root_input("yes"), Err(()));
+    }
+
+    #[test]
+    fn normalize_toggle_input_accepts_yes_no() {
+        assert_eq!(normalize_toggle_input("y"), Ok(Some(true)));
+        assert_eq!(normalize_toggle_input("N"), Ok(Some(false)));
     }
 }

@@ -19,6 +19,11 @@ struct Cli {
     #[command(subcommand)]
     subcommand: Option<Commands>,
 
+    #[arg(short = 'H', long = "hidden", global = true, conflicts_with = "no_hidden")]
+    hidden: bool,
+    #[arg(long = "no-hidden", global = true, conflicts_with = "hidden")]
+    no_hidden: bool,
+
     #[arg(value_name = "command", trailing_var_arg = true)]
     command: Vec<String>,
 }
@@ -30,6 +35,8 @@ enum Commands {
         search_root: Option<String>,
         #[arg(long)]
         default_command: Option<String>,
+        #[arg(long)]
+        include_hidden: Option<bool>,
     },
 }
 
@@ -39,6 +46,8 @@ struct Config {
     default_command: String,
     #[serde(default)]
     include_root: bool,
+    #[serde(default)]
+    include_hidden: bool,
 }
 
 impl Default for Config {
@@ -47,6 +56,7 @@ impl Default for Config {
             search_root: DEFAULT_SEARCH_ROOT.to_string(),
             default_command: DEFAULT_COMMAND.to_string(),
             include_root: false,
+            include_hidden: false,
         }
     }
 }
@@ -69,15 +79,17 @@ fn run(cli: Cli) -> Result<(), String> {
     if let Some(Commands::Config {
         search_root,
         default_command,
+        include_hidden,
     }) = cli.subcommand
     {
         let old_config = config.clone();
 
-        if search_root.is_none() && default_command.is_none() {
+        if search_root.is_none() && default_command.is_none() && include_hidden.is_none() {
             config_ui::interactive_config(
                 &mut config.search_root,
                 &mut config.default_command,
                 &mut config.include_root,
+                &mut config.include_hidden,
             )?;
         } else {
             if let Some(value) = search_root {
@@ -85,6 +97,9 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             if let Some(value) = default_command {
                 config.default_command = value;
+            }
+            if let Some(value) = include_hidden {
+                config.include_hidden = value;
             }
         }
 
@@ -97,7 +112,12 @@ fn run(cli: Cli) -> Result<(), String> {
         return Ok(());
     }
 
-    let selected_dir = select_directory(&expand_home(&config.search_root), config.include_root)?;
+    let include_hidden = resolve_include_hidden(cli.hidden, cli.no_hidden, config.include_hidden);
+    let selected_dir = select_directory(
+        &expand_home(&config.search_root),
+        config.include_root,
+        include_hidden,
+    )?;
     let Some(selected_dir) = selected_dir else {
         return Ok(());
     };
@@ -114,15 +134,28 @@ fn run(cli: Cli) -> Result<(), String> {
     }
 }
 
-fn select_directory(search_root: &str, include_root: bool) -> Result<Option<PathBuf>, String> {
-    fzf_select_directory(search_root, include_root)
+fn select_directory(
+    search_root: &str,
+    include_root: bool,
+    include_hidden: bool,
+) -> Result<Option<PathBuf>, String> {
+    fzf_select_directory(search_root, include_root, include_hidden)
 }
 
-fn fzf_select_directory(search_root: &str, include_root: bool) -> Result<Option<PathBuf>, String> {
-    let mut fd_child = Command::new("fd")
+fn fzf_select_directory(
+    search_root: &str,
+    include_root: bool,
+    include_hidden: bool,
+) -> Result<Option<PathBuf>, String> {
+    let mut fd_cmd = Command::new("fd");
+    fd_cmd
         .arg("--type")
         .arg("directory")
-        .arg("--absolute-path")
+        .arg("--absolute-path");
+    if include_hidden {
+        fd_cmd.arg("--hidden");
+    }
+    let mut fd_child = fd_cmd
         .arg(".")
         .arg(search_root)
         .stdout(Stdio::piped())
@@ -222,6 +255,16 @@ fn parse_selection(selection: &str) -> Option<PathBuf> {
     }
 
     Some(PathBuf::from(selected))
+}
+
+fn resolve_include_hidden(hidden: bool, no_hidden: bool, default_include_hidden: bool) -> bool {
+    if hidden {
+        true
+    } else if no_hidden {
+        false
+    } else {
+        default_include_hidden
+    }
 }
 
 fn ensure_dependencies() -> Result<(), String> {
@@ -355,6 +398,7 @@ mod tests {
             search_root: "/home/regueiro".to_string(),
             default_command: "qwen".to_string(),
             include_root: true,
+            include_hidden: true,
         };
 
         write_config(&config_path, &expected).expect("write config should succeed");
@@ -374,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_and_load_config_defaults_include_root_when_missing() {
+    fn ensure_and_load_config_defaults_toggles_when_missing() {
         let dir = TestDir::new();
         let config_path = dir.path.join("config.toml");
         fs::write(
@@ -385,6 +429,7 @@ mod tests {
 
         let cfg = ensure_and_load_config(&config_path).expect("load config should succeed");
         assert!(!cfg.include_root);
+        assert!(!cfg.include_hidden);
     }
 
     #[test]
@@ -415,5 +460,21 @@ mod tests {
         let root = absolute_root_path("relative-root").expect("should resolve relative path");
         assert!(Path::new(&root).is_absolute());
         assert!(root.ends_with("relative-root"));
+    }
+
+    #[test]
+    fn resolve_include_hidden_uses_hidden_override() {
+        assert!(super::resolve_include_hidden(true, false, false));
+    }
+
+    #[test]
+    fn resolve_include_hidden_uses_no_hidden_override() {
+        assert!(!super::resolve_include_hidden(false, true, true));
+    }
+
+    #[test]
+    fn resolve_include_hidden_falls_back_to_default() {
+        assert!(super::resolve_include_hidden(false, false, true));
+        assert!(!super::resolve_include_hidden(false, false, false));
     }
 }
