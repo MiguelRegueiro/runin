@@ -33,7 +33,7 @@ enum Commands {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Config {
     search_root: String,
     default_command: String,
@@ -68,6 +68,8 @@ fn run(cli: Cli) -> Result<(), String> {
         default_command,
     }) = cli.subcommand
     {
+        let old_config = config.clone();
+
         if search_root.is_none() && default_command.is_none() {
             config_ui::interactive_config(&mut config.search_root, &mut config.default_command)?;
         } else {
@@ -78,8 +80,13 @@ fn run(cli: Cli) -> Result<(), String> {
                 config.default_command = value;
             }
         }
-        write_config(&config_path, &config)?;
-        println!("Updated config at {}", config_path.display());
+
+        if config != old_config {
+            write_config(&config_path, &config)?;
+            println!("saved");
+        } else {
+            println!("unchanged");
+        }
         return Ok(());
     }
 

@@ -4,14 +4,12 @@ pub fn interactive_config(search_root: &mut String, default_command: &mut String
     clear_if_corrupt(search_root);
     clear_if_corrupt(default_command);
 
-    println!();
     println!("runin config");
-    println!();
+    println!("────────────");
 
     if let Some(value) = prompt_value("Search root", search_root)? {
         *search_root = value;
     }
-    println!();
     if let Some(value) = prompt_value("Default command", default_command)? {
         *default_command = value;
     }
