@@ -55,6 +55,18 @@ runin config
 
 ```
 
+Interactive flow:
+
+```text
+runin config
+────────────
+Search root [/home/user]:
+>
+Default command [nvim .]:
+>
+saved
+```
+
 
 Config file location:
 
@@ -106,6 +118,8 @@ default_command = "nvim ."
 
 
 Both are mandatory and must be available in your `PATH`.
+
+If missing, `runin` prints a clear message to install `fd` and `fzf` and ensure both are in `PATH`.
 
 
 ---
