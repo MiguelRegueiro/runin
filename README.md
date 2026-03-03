@@ -105,7 +105,7 @@ default_command = "nvim ."
 - `fzf`
 
 
-Both must be available in your `PATH`.
+Both are mandatory and must be available in your `PATH`.
 
 
 ---

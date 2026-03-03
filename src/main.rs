@@ -2,13 +2,17 @@ use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, IsTerminal, Write};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
 
 const DEFAULT_SEARCH_ROOT: &str = "$HOME/Documents";
 const DEFAULT_COMMAND: &str = "code .";
+const ANSI_RESET: &str = "\x1b[0m";
+const ANSI_BOLD: &str = "\x1b[1m";
+const ANSI_CYAN: &str = "\x1b[36m";
+const ANSI_DIM: &str = "\x1b[2m";
 
 #[derive(Parser)]
 #[command(name = "runin")]
@@ -56,6 +60,8 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<(), String> {
+    ensure_dependencies()?;
+
     let config_path = config_path()?;
     let mut config = ensure_and_load_config(&config_path)?;
 
@@ -101,20 +107,21 @@ fn select_directory(search_root: &str) -> Result<Option<PathBuf>, String> {
 }
 
 fn fzf_select_directory(search_root: &str) -> Result<Option<PathBuf>, String> {
-    let fd_output = Command::new("fd")
+    let mut fd_child = Command::new("fd")
         .arg("--type")
         .arg("directory")
         .arg("--absolute-path")
         .arg(".")
         .arg(search_root)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
+        .stderr(Stdio::inherit())
+        .spawn()
         .map_err(|e| format!("Failed to run fd: {e}"))?;
 
-    if !fd_output.status.success() {
-        return Err("fd failed while listing directories".to_string());
-    }
+    let fd_stdout = fd_child
+        .stdout
+        .take()
+        .ok_or("Failed to capture fd stdout")?;
 
     let mut fzf_child = Command::new("fzf")
         .arg("--height")
@@ -122,8 +129,12 @@ fn fzf_select_directory(search_root: &str) -> Result<Option<PathBuf>, String> {
         .arg("--layout")
         .arg("reverse")
         .arg("--border")
+        .arg("--info")
+        .arg("inline-right")
+        .arg("--header")
+        .arg("Type to filter | Enter select | Esc cancel")
         .arg("--prompt")
-        .arg("search_root > ")
+        .arg("project > ")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -131,14 +142,15 @@ fn fzf_select_directory(search_root: &str) -> Result<Option<PathBuf>, String> {
         .map_err(|e| format!("Failed to spawn fzf: {e}"))?;
 
     {
-        let mut stdin = fzf_child
+        let mut fzf_stdin = fzf_child
             .stdin
             .take()
             .ok_or("Failed to capture fzf stdin")?;
-        writeln!(stdin, "{search_root}").map_err(|e| format!("Failed writing to fzf: {e}"))?;
-        stdin
-            .write_all(&fd_output.stdout)
-            .map_err(|e| format!("Failed writing fd output to fzf: {e}"))?;
+        writeln!(fzf_stdin, "{search_root}").map_err(|e| format!("Failed writing to fzf: {e}"))?;
+
+        let mut fd_stdout = fd_stdout;
+        io::copy(&mut fd_stdout, &mut fzf_stdin)
+            .map_err(|e| format!("Failed streaming directories to fzf: {e}"))?;
     }
 
     let mut selection = String::new();
@@ -152,6 +164,13 @@ fn fzf_select_directory(search_root: &str) -> Result<Option<PathBuf>, String> {
     let status = fzf_child
         .wait()
         .map_err(|e| format!("Failed to wait on fzf: {e}"))?;
+    let fd_status = fd_child
+        .wait()
+        .map_err(|e| format!("Failed to wait on fd: {e}"))?;
+
+    if !fd_status.success() {
+        return Err("fd failed while listing directories".to_string());
+    }
 
     if let Some(code) = status.code() {
         if code == 130 {
@@ -170,6 +189,30 @@ fn fzf_select_directory(search_root: &str) -> Result<Option<PathBuf>, String> {
     }
 
     Ok(Some(PathBuf::from(selected)))
+}
+
+fn ensure_dependencies() -> Result<(), String> {
+    let required = ["fd", "fzf"];
+    let missing: Vec<&str> = required
+        .into_iter()
+        .filter(|binary| {
+            Command::new(binary)
+                .arg("--version")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_err()
+        })
+        .collect();
+
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Missing required dependency(s): {}. Install them and retry.",
+            missing.join(", ")
+        ))
+    }
 }
 
 fn exec_command(selected_dir: &Path, mut parts: Vec<String>) -> ! {
@@ -215,56 +258,52 @@ fn write_config(path: &Path, cfg: &Config) -> Result<(), String> {
 }
 
 fn interactive_config(cfg: &mut Config) -> Result<(), String> {
-    println!("================");
-    println!("  runin config");
-    println!("================");
-    println!("Press Enter to keep the current value.");
+    println!();
+    println!("{}", ui_title("runin config"));
+    println!("{}", ui_dim("Fast setup. Press Enter to keep current values."));
     println!();
 
     if let Some(new_root) = prompt_search_root(&cfg.search_root)? {
         cfg.search_root = new_root;
     }
     println!();
+    println!("{}", ui_section("default command"));
     if let Some(new_command) = prompt_with_default("default_command", &cfg.default_command)? {
         cfg.default_command = new_command;
     }
+    println!();
+    println!("{}", ui_dim("Config updated."));
     Ok(())
 }
 
 fn prompt_search_root(current: &str) -> Result<Option<String>, String> {
-    println!("search_root");
-    println!("  current: {current}");
-    println!("  choose:");
-    println!("    - Change search_root (fd+fzf)");
-    println!("    - Keep current search_root");
-    println!("  (Enter confirms, arrow keys move)");
+    println!("{}", ui_section("search root"));
+    println!("Current: {current}");
 
     let choice = fzf_select_option(
-        vec![
-            "Change search_root (fd+fzf)",
-            "Keep current search_root",
-        ],
-        "action > ",
+        vec!["Change search root", "Keep current"],
+        "config > ",
+        "Enter confirm | Esc keep current",
     )?;
 
     let Some(choice) = choice else {
         return Ok(None);
     };
 
-    if choice == "Keep current search_root" {
-        println!("  selected: {current}");
+    if choice == "Keep current" {
+        println!("Selected: {current}");
         return Ok(None);
     }
 
-    if choice == "Change search_root (fd+fzf)" {
+    if choice == "Change search root" {
         let home = env::var("HOME").map_err(|_| "HOME environment variable is not set".to_string())?;
         let picked = fzf_select_directory(&home)?;
         if let Some(path) = picked {
             let path_str = path.to_string_lossy().to_string();
-            println!("  selected: {path_str}");
+            println!("Selected: {path_str}");
             return Ok(Some(path_str));
         }
-        println!("  selected: {current}");
+        println!("Selected: {current}");
         return Ok(None);
     }
 
@@ -272,9 +311,8 @@ fn prompt_search_root(current: &str) -> Result<Option<String>, String> {
 }
 
 fn prompt_with_default(field: &str, current: &str) -> Result<Option<String>, String> {
-    println!("{field}");
-    println!("  current: {current}");
-    print!("  new value: ");
+    println!("Current: {current}");
+    print!("{field} > ");
     io::stdout()
         .flush()
         .map_err(|e| format!("Failed flushing stdout: {e}"))?;
@@ -292,13 +330,17 @@ fn prompt_with_default(field: &str, current: &str) -> Result<Option<String>, Str
     }
 }
 
-fn fzf_select_option(options: Vec<&str>, prompt: &str) -> Result<Option<String>, String> {
+fn fzf_select_option(options: Vec<&str>, prompt: &str, header: &str) -> Result<Option<String>, String> {
     let mut fzf_child = Command::new("fzf")
         .arg("--height")
         .arg("40%")
         .arg("--layout")
         .arg("reverse")
         .arg("--border")
+        .arg("--info")
+        .arg("inline-right")
+        .arg("--header")
+        .arg(header)
         .arg("--prompt")
         .arg(prompt)
         .stdin(Stdio::piped())
@@ -349,6 +391,39 @@ fn fzf_select_option(options: Vec<&str>, prompt: &str) -> Result<Option<String>,
     } else {
         Ok(Some(picked.to_string()))
     }
+}
+
+fn ui_title(text: &str) -> String {
+    style(text, &[ANSI_BOLD, ANSI_CYAN])
+}
+
+fn ui_section(text: &str) -> String {
+    style(text, &[ANSI_BOLD])
+}
+
+fn ui_dim(text: &str) -> String {
+    style(text, &[ANSI_DIM])
+}
+
+fn style(text: &str, codes: &[&str]) -> String {
+    if !color_enabled() {
+        return text.to_string();
+    }
+
+    let prefix = codes.join("");
+    format!("{prefix}{text}{ANSI_RESET}")
+}
+
+fn color_enabled() -> bool {
+    if env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+
+    if env::var("TERM").is_ok_and(|term| term == "dumb") {
+        return false;
+    }
+
+    io::stdout().is_terminal()
 }
 
 fn expand_home(path: &str) -> String {
