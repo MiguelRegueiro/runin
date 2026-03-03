@@ -1,6 +1,7 @@
 mod config_ui;
 
-use clap::{Parser, Subcommand};
+use clap::builder::styling::AnsiColor;
+use clap::{builder::Styles, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
@@ -14,44 +15,47 @@ const DEFAULT_COMMAND: &str = "code .";
 
 #[derive(Parser)]
 #[command(name = "runin")]
+#[command(color = clap::ColorChoice::Auto)]
 #[command(version)]
+#[command(allow_external_subcommands = false)]
 #[command(about = "runin — quickly select a project directory and run a command inside it")]
 #[command(
-    override_help = "runin — quickly select a project directory and run a command inside it
-
-Usage:
+    styles = Styles::styled()
+        .header(AnsiColor::BrightCyan.on_default().bold())
+        .usage(AnsiColor::BrightGreen.on_default().bold())
+        .literal(AnsiColor::Yellow.on_default())
+)]
+#[command(
+    after_help = "Usage:
   runin [OPTIONS] [CMD]...
   runin config
-
-Arguments:
-  [CMD]...     Command to execute in the selected directory
-               (defaults to configured command)
-
-Commands:
-  config       Open interactive configuration
-  help         Print this message or the help of a subcommand
-
-Options:
-  -H, --hidden Include hidden directories in search (fd --hidden)
-  -h, --help   Print help
-  -V, --version Print version
 
 Examples:
   runin
   runin nvim .
   runin tmux new-session
   runin -H nvim .
+  runin -H
   runin config"
 )]
 struct Cli {
     #[command(subcommand)]
     subcommand: Option<Commands>,
 
-    #[arg(short = 'H', long = "hidden", global = true)]
+    #[arg(
+        short = 'H',
+        long = "hidden",
+        global = true,
+        help = "Include hidden directories in search (fd --hidden)"
+    )]
     hidden: bool,
 
-    #[arg(value_name = "command", trailing_var_arg = true)]
-    command: Vec<String>,
+    #[arg(
+        value_name = "CMD",
+        trailing_var_arg = true,
+        help = "Command to execute in the selected directory\n(defaults to configured command)"
+    )]
+    cmd: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -149,7 +153,7 @@ fn run(cli: Cli) -> Result<(), String> {
         return Ok(());
     };
 
-    if cli.command.is_empty() {
+    if cli.cmd.is_empty() {
         let parts = shell_words::split(&config.default_command)
             .map_err(|e| format!("Invalid default_command in config: {e}"))?;
         if parts.is_empty() {
@@ -157,7 +161,7 @@ fn run(cli: Cli) -> Result<(), String> {
         }
         exec_command(&selected_dir, parts);
     } else {
-        exec_command(&selected_dir, cli.command);
+        exec_command(&selected_dir, cli.cmd);
     }
 }
 
