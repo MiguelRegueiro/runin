@@ -269,3 +269,75 @@ fn expand_home(path: &str) -> String {
         path.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ensure_and_load_config, write_config, Config, DEFAULT_COMMAND, DEFAULT_SEARCH_ROOT};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TestDir {
+        path: PathBuf,
+    }
+
+    impl TestDir {
+        fn new() -> Self {
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock before epoch")
+                .as_nanos();
+            let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!("runin-test-{ts}-{seq}"));
+            fs::create_dir_all(&path).expect("failed to create temp test dir");
+            Self { path }
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn ensure_and_load_config_creates_default_when_missing() {
+        let dir = TestDir::new();
+        let config_path = dir.path.join("config.toml");
+
+        let cfg = ensure_and_load_config(&config_path).expect("should create and load config");
+
+        assert_eq!(cfg.search_root, DEFAULT_SEARCH_ROOT);
+        assert_eq!(cfg.default_command, DEFAULT_COMMAND);
+        assert!(config_path.exists());
+    }
+
+    #[test]
+    fn write_and_load_config_roundtrip() {
+        let dir = TestDir::new();
+        let config_path = dir.path.join("config.toml");
+        let expected = Config {
+            search_root: "/home/regueiro".to_string(),
+            default_command: "qwen".to_string(),
+        };
+
+        write_config(&config_path, &expected).expect("write config should succeed");
+        let loaded = ensure_and_load_config(&config_path).expect("load config should succeed");
+
+        assert_eq!(loaded, expected);
+    }
+
+    #[test]
+    fn ensure_and_load_config_returns_error_for_invalid_toml() {
+        let dir = TestDir::new();
+        let config_path = dir.path.join("config.toml");
+        fs::write(&config_path, "not-valid-toml = [")
+            .expect("failed to write invalid test config");
+
+        let err = ensure_and_load_config(&config_path).expect_err("invalid TOML should fail");
+        assert!(err.contains("Failed parsing config"));
+    }
+}
