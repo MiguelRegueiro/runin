@@ -160,7 +160,8 @@ fn fzf_select_directory(search_root: &str, include_root: bool) -> Result<Option<
             .ok_or("Failed to capture fzf stdin")?;
         if include_root {
             let root = absolute_root_path(search_root)?;
-            writeln!(fzf_stdin, "{root}").map_err(|e| format!("Failed writing root option to fzf: {e}"))?;
+            writeln!(fzf_stdin, "{root}")
+                .map_err(|e| format!("Failed writing root option to fzf: {e}"))?;
         }
 
         let mut fd_stdout = fd_stdout;
@@ -170,7 +171,10 @@ fn fzf_select_directory(search_root: &str, include_root: bool) -> Result<Option<
 
     let mut selection = String::new();
     {
-        let mut stdout = fzf_child.stdout.take().ok_or("Failed to capture fzf stdout")?;
+        let mut stdout = fzf_child
+            .stdout
+            .take()
+            .ok_or("Failed to capture fzf stdout")?;
         BufReader::new(&mut stdout)
             .read_line(&mut selection)
             .map_err(|e| format!("Failed reading fzf output: {e}"))?;
@@ -281,8 +285,8 @@ fn write_config(path: &Path, cfg: &Config) -> Result<(), String> {
             .map_err(|e| format!("Failed creating config directory {}: {e}", parent.display()))?;
     }
 
-    let content = toml::to_string_pretty(cfg)
-        .map_err(|e| format!("Failed serializing config: {e}"))?;
+    let content =
+        toml::to_string_pretty(cfg).map_err(|e| format!("Failed serializing config: {e}"))?;
     fs::write(path, content).map_err(|e| format!("Failed writing config {}: {e}", path.display()))
 }
 
@@ -363,8 +367,7 @@ mod tests {
     fn ensure_and_load_config_returns_error_for_invalid_toml() {
         let dir = TestDir::new();
         let config_path = dir.path.join("config.toml");
-        fs::write(&config_path, "not-valid-toml = [")
-            .expect("failed to write invalid test config");
+        fs::write(&config_path, "not-valid-toml = [").expect("failed to write invalid test config");
 
         let err = ensure_and_load_config(&config_path).expect_err("invalid TOML should fail");
         assert!(err.contains("Failed parsing config"));
