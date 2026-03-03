@@ -9,15 +9,17 @@ pub fn interactive_config(
     clear_if_corrupt(search_root);
     clear_if_corrupt(default_command);
 
-    println!("runin config");
-    println!("────────────");
+    println!("{}", style("runin setup", Style::Title));
+    println!();
 
     if let Some(value) = prompt_value("Search root", search_root)? {
         *search_root = value;
     }
+
     if let Some(value) = prompt_value("Default command", default_command)? {
         *default_command = value;
     }
+
     if let Some(value) = prompt_include_root(*include_root)? {
         *include_root = value;
     }
@@ -29,8 +31,12 @@ pub fn interactive_config(
 }
 
 fn prompt_value(label: &str, current: &str) -> Result<Option<String>, String> {
-    println!("{label} [{current}]:");
-    print!("> ");
+    println!(
+        "{} {}:",
+        style(label, Style::Label),
+        style(&format!("[{current}]"), Style::Muted)
+    );
+    print!("{}", style("> ", Style::Prompt));
     io::stdout()
         .flush()
         .map_err(|e| format!("Failed flushing stdout: {e}"))?;
@@ -64,35 +70,23 @@ fn normalize_input(raw: &str) -> Option<String> {
 }
 
 fn prompt_include_root(current: bool) -> Result<Option<bool>, String> {
-    let current_label = if current { "y" } else { "n" };
-    loop {
-        println!("Include root [{current_label}]:");
-        print!("> ");
-        io::stdout()
-            .flush()
-            .map_err(|e| format!("Failed flushing stdout: {e}"))?;
-
-        let mut input = String::new();
-        io::stdin()
-            .read_line(&mut input)
-            .map_err(|e| format!("Failed reading Include root: {e}"))?;
-
-        match normalize_include_root_input(input.trim()) {
-            Ok(value) => return Ok(value),
-            Err(()) => println!("Please enter y, n, or press Enter to keep current."),
-        }
-    }
-}
-
-fn normalize_include_root_input(raw: &str) -> Result<Option<bool>, ()> {
-    normalize_toggle_input(raw)
+    prompt_toggle("Include root", current)
 }
 
 fn prompt_include_hidden(current: bool) -> Result<Option<bool>, String> {
+    prompt_toggle("Include hidden paths", current)
+}
+
+fn prompt_toggle(label: &str, current: bool) -> Result<Option<bool>, String> {
     let current_label = if current { "y" } else { "n" };
     loop {
-        println!("Include hidden paths [{current_label}]:");
-        print!("> ");
+        println!(
+            "{} {} {}:",
+            style(label, Style::Label),
+            style("(y/n)", Style::Muted),
+            style(&format!("[{current_label}]"), Style::Muted)
+        );
+        print!("{}", style("> ", Style::Prompt));
         io::stdout()
             .flush()
             .map_err(|e| format!("Failed flushing stdout: {e}"))?;
@@ -100,11 +94,14 @@ fn prompt_include_hidden(current: bool) -> Result<Option<bool>, String> {
         let mut input = String::new();
         io::stdin()
             .read_line(&mut input)
-            .map_err(|e| format!("Failed reading Include hidden paths: {e}"))?;
+            .map_err(|e| format!("Failed reading {label}: {e}"))?;
 
         match normalize_toggle_input(input.trim()) {
             Ok(value) => return Ok(value),
-            Err(()) => println!("Please enter y, n, or press Enter to keep current."),
+            Err(()) => println!(
+                "{}",
+                style("Please enter y, n, or press Enter to keep current.", Style::Error)
+            ),
         }
     }
 }
@@ -121,11 +118,29 @@ fn normalize_toggle_input(raw: &str) -> Result<Option<bool>, ()> {
     }
 }
 
+#[derive(Clone, Copy)]
+enum Style {
+    Title,
+    Label,
+    Muted,
+    Prompt,
+    Error,
+}
+
+fn style(text: &str, style: Style) -> String {
+    let code = match style {
+        Style::Title => "1;36",
+        Style::Label => "1",
+        Style::Muted => "2",
+        Style::Prompt => "1;34",
+        Style::Error => "1;31",
+    };
+    format!("\x1b[{code}m{text}\x1b[0m")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{
-        clear_if_corrupt, normalize_include_root_input, normalize_input, normalize_toggle_input,
-    };
+    use super::{clear_if_corrupt, normalize_input, normalize_toggle_input};
 
     #[test]
     fn clear_if_corrupt_clears_when_control_chars_present() {
@@ -157,25 +172,25 @@ mod tests {
     }
 
     #[test]
-    fn normalize_include_root_input_keeps_current_on_empty() {
-        assert_eq!(normalize_include_root_input(""), Ok(None));
+    fn normalize_toggle_input_keeps_current_on_empty() {
+        assert_eq!(normalize_toggle_input(""), Ok(None));
     }
 
     #[test]
-    fn normalize_include_root_input_accepts_yes() {
-        assert_eq!(normalize_include_root_input("y"), Ok(Some(true)));
-        assert_eq!(normalize_include_root_input("Y"), Ok(Some(true)));
+    fn normalize_toggle_input_accepts_yes() {
+        assert_eq!(normalize_toggle_input("y"), Ok(Some(true)));
+        assert_eq!(normalize_toggle_input("Y"), Ok(Some(true)));
     }
 
     #[test]
-    fn normalize_include_root_input_accepts_no() {
-        assert_eq!(normalize_include_root_input("n"), Ok(Some(false)));
-        assert_eq!(normalize_include_root_input("N"), Ok(Some(false)));
+    fn normalize_toggle_input_accepts_no() {
+        assert_eq!(normalize_toggle_input("n"), Ok(Some(false)));
+        assert_eq!(normalize_toggle_input("N"), Ok(Some(false)));
     }
 
     #[test]
-    fn normalize_include_root_input_rejects_invalid() {
-        assert_eq!(normalize_include_root_input("yes"), Err(()));
+    fn normalize_toggle_input_rejects_invalid() {
+        assert_eq!(normalize_toggle_input("yes"), Err(()));
     }
 
     #[test]
