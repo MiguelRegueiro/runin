@@ -14,15 +14,41 @@ const DEFAULT_COMMAND: &str = "code .";
 
 #[derive(Parser)]
 #[command(name = "runin")]
-#[command(about = "Pick a project directory with fd+fzf and run a command")]
+#[command(version)]
+#[command(about = "runin — quickly select a project directory and run a command inside it")]
+#[command(
+    override_help = "runin — quickly select a project directory and run a command inside it
+
+Usage:
+  runin [OPTIONS] [CMD]...
+  runin config
+
+Arguments:
+  [CMD]...     Command to execute in the selected directory
+               (defaults to configured command)
+
+Commands:
+  config       Open interactive configuration
+  help         Print this message or the help of a subcommand
+
+Options:
+  -H, --hidden Include hidden directories in search (fd --hidden)
+  -h, --help   Print help
+  -V, --version Print version
+
+Examples:
+  runin
+  runin nvim .
+  runin tmux new-session
+  runin -H nvim .
+  runin config"
+)]
 struct Cli {
     #[command(subcommand)]
     subcommand: Option<Commands>,
 
-    #[arg(short = 'H', long = "hidden", global = true, conflicts_with = "no_hidden")]
+    #[arg(short = 'H', long = "hidden", global = true)]
     hidden: bool,
-    #[arg(long = "no-hidden", global = true, conflicts_with = "hidden")]
-    no_hidden: bool,
 
     #[arg(value_name = "command", trailing_var_arg = true)]
     command: Vec<String>,
@@ -30,6 +56,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(about = "Open interactive configuration")]
     Config {
         #[arg(long)]
         search_root: Option<String>,
@@ -112,7 +139,7 @@ fn run(cli: Cli) -> Result<(), String> {
         return Ok(());
     }
 
-    let include_hidden = resolve_include_hidden(cli.hidden, cli.no_hidden, config.include_hidden);
+    let include_hidden = resolve_include_hidden(cli.hidden, config.include_hidden);
     let selected_dir = select_directory(
         &expand_home(&config.search_root),
         config.include_root,
@@ -257,11 +284,9 @@ fn parse_selection(selection: &str) -> Option<PathBuf> {
     Some(PathBuf::from(selected))
 }
 
-fn resolve_include_hidden(hidden: bool, no_hidden: bool, default_include_hidden: bool) -> bool {
+fn resolve_include_hidden(hidden: bool, default_include_hidden: bool) -> bool {
     if hidden {
         true
-    } else if no_hidden {
-        false
     } else {
         default_include_hidden
     }
@@ -464,17 +489,12 @@ mod tests {
 
     #[test]
     fn resolve_include_hidden_uses_hidden_override() {
-        assert!(super::resolve_include_hidden(true, false, false));
-    }
-
-    #[test]
-    fn resolve_include_hidden_uses_no_hidden_override() {
-        assert!(!super::resolve_include_hidden(false, true, true));
+        assert!(super::resolve_include_hidden(true, false));
     }
 
     #[test]
     fn resolve_include_hidden_falls_back_to_default() {
-        assert!(super::resolve_include_hidden(false, false, true));
-        assert!(!super::resolve_include_hidden(false, false, false));
+        assert!(super::resolve_include_hidden(false, true));
+        assert!(!super::resolve_include_hidden(false, false));
     }
 }
