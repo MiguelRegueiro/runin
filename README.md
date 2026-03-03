@@ -1,10 +1,9 @@
  # runin
 
+[![CI](https://github.com/MiguelRegueiro/runin/actions/workflows/ci.yml/badge.svg)](https://github.com/MiguelRegueiro/runin/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/runin.svg)](https://crates.io/crates/runin)
 
-Pick a directory under a configured root using `fd + fzf` and run a command inside it.
-
-
-`runin` is designed for quickly running commands (e.g. `nvim`, `code`, `tmux`) from any project directory.
+Pick a project directory with `fd + fzf` and run a command inside it.
 
 
 ---
@@ -37,6 +36,16 @@ runin nvim .
 
 runin tmux new-session
 
+```
+
+---
+
+## Installation
+
+Install from crates.io:
+
+```bash
+cargo install runin
 ```
 
 ---
@@ -94,6 +103,8 @@ include_root = false
 
 ```
 
+When `include_root = true`, the picker includes `search_root` itself as a selectable entry.
+
 
 ---
 
@@ -113,40 +124,27 @@ include_root = false
 
 ## Dependencies
 
-
-`runin` requires:
-
-
+Required tools:
 - `fd`
-
 - `fzf`
 
-
-Both are mandatory and must be available in your `PATH`.
-
-If missing, `runin` prints a clear message to install `fd` and `fzf` and ensure both are in `PATH`.
-
-When `include_root = true`, the picker includes the configured `search_root` itself as a selectable entry.
+Both must be available in your `PATH`.
+If missing, `runin` prints an install hint.
 
 
 ---
 
 
-## Running (no pun intended)
-
-
-From source:
-
+<details>
+<summary>Running from source</summary>
 
 ```bash
-
 git clone https://github.com/MiguelRegueiro/runin
-
 cd runin
-
 cargo run --release
-
 ```
+
+</details>
 
 ---
 
