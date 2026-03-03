@@ -60,7 +60,21 @@ pub(crate) fn write_config(path: &Path, cfg: &Config) -> Result<(), String> {
 
 pub(crate) fn expand_home(path: &str) -> String {
     if let Some(home) = env::var_os("HOME") {
-        path.replace("$HOME", &home.to_string_lossy())
+        expand_home_with(path, &home.to_string_lossy())
+    } else {
+        path.to_string()
+    }
+}
+
+pub(crate) fn expand_home_with(path: &str, home: &str) -> String {
+    if let Some(rest) = path.strip_prefix("$HOME") {
+        format!("{home}{rest}")
+    } else if let Some(rest) = path.strip_prefix("${HOME}") {
+        format!("{home}{rest}")
+    } else if path == "~" {
+        home.to_string()
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        format!("{home}/{rest}")
     } else {
         path.to_string()
     }

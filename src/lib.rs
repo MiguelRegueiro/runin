@@ -66,8 +66,14 @@ enum Commands {
         search_root: Option<String>,
         #[arg(long)]
         default_command: Option<String>,
-        #[arg(long)]
-        include_hidden: Option<bool>,
+        #[arg(long, conflicts_with = "no_include_root")]
+        include_root: bool,
+        #[arg(long = "no-include-root", conflicts_with = "include_root")]
+        no_include_root: bool,
+        #[arg(long, conflicts_with = "no_include_hidden")]
+        include_hidden: bool,
+        #[arg(long = "no-include-hidden", conflicts_with = "include_hidden")]
+        no_include_hidden: bool,
     },
 }
 
@@ -89,12 +95,21 @@ fn run(cli: Cli) -> Result<(), String> {
     if let Some(Commands::Config {
         search_root,
         default_command,
+        include_root,
+        no_include_root,
         include_hidden,
+        no_include_hidden,
     }) = cli.subcommand
     {
         let old_config = config.clone();
+        let include_root = resolve_config_toggle(include_root, no_include_root);
+        let include_hidden = resolve_config_toggle(include_hidden, no_include_hidden);
 
-        if search_root.is_none() && default_command.is_none() && include_hidden.is_none() {
+        if search_root.is_none()
+            && default_command.is_none()
+            && include_root.is_none()
+            && include_hidden.is_none()
+        {
             config_ui::interactive_config(
                 &mut config.search_root,
                 &mut config.default_command,
@@ -107,6 +122,9 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             if let Some(value) = default_command {
                 config.default_command = value;
+            }
+            if let Some(value) = include_root {
+                config.include_root = value;
             }
             if let Some(value) = include_hidden {
                 config.include_hidden = value;
@@ -157,6 +175,14 @@ fn fzf_select_directory(
     include_root: bool,
     include_hidden: bool,
 ) -> Result<Option<PathBuf>, String> {
+    let root_path = Path::new(search_root);
+    if !root_path.exists() {
+        return Err(format!("Search root does not exist: {search_root}"));
+    }
+    if !root_path.is_dir() {
+        return Err(format!("Search root is not a directory: {search_root}"));
+    }
+
     let mut fd_cmd = Command::new("fd");
     fd_cmd.arg("--type").arg("directory").arg("--absolute-path");
     if include_hidden {
@@ -228,7 +254,9 @@ fn fzf_select_directory(
         .map_err(|e| format!("Failed to wait on fd: {e}"))?;
 
     if !fd_status.success() {
-        return Err("fd failed while listing directories".to_string());
+        return Err(format!(
+            "fd failed while listing directories (search_root: {search_root}, include_hidden: {include_hidden})"
+        ));
     }
 
     if let Some(code) = status.code() {
@@ -272,17 +300,29 @@ fn resolve_include_hidden(hidden: bool, default_include_hidden: bool) -> bool {
     }
 }
 
+fn resolve_config_toggle(enable: bool, disable: bool) -> Option<bool> {
+    if enable {
+        Some(true)
+    } else if disable {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 fn ensure_dependencies() -> Result<(), String> {
     let required = ["fd", "fzf"];
     let missing: Vec<&str> = required
         .into_iter()
         .filter(|binary| {
-            Command::new(binary)
-                .arg("--version")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .is_err()
+            !matches!(
+                Command::new(binary)
+                    .arg("--version")
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status(),
+                Ok(status) if status.success()
+            )
         })
         .collect();
 

@@ -5,9 +5,15 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 - Added hidden directory support controls:
-  - Persistent config toggle via `runin config --include-hidden <true|false>`.
+  - Persistent config toggles via `runin config --include-hidden` / `--no-include-hidden`.
+  - Added matching root toggles: `runin config --include-root` / `--no-include-root`.
   - One-run override via `-H, --hidden`.
   - Interactive config prompt includes `Include hidden paths (y/n)`.
+- Improved config and runtime robustness:
+  - Added `search_root` validation (must exist and be a directory) before running `fd`.
+  - Improved `fd` failure errors with contextual details.
+  - Tightened dependency checks to require successful `--version` execution.
+  - Made home expansion safer by supporting start-only `$HOME`, `${HOME}`, and `~`.
 - Improved CLI help output:
   - Added explicit clap color styling (cyan headers, green usage, yellow literals).
   - Refined help content and examples, including `runin -H`.

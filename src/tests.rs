@@ -1,7 +1,8 @@
 use crate::config::{
-    ensure_and_load_config, write_config, Config, DEFAULT_COMMAND, DEFAULT_SEARCH_ROOT,
+    ensure_and_load_config, expand_home_with, write_config, Config, DEFAULT_COMMAND,
+    DEFAULT_SEARCH_ROOT,
 };
-use crate::{absolute_root_path, parse_selection, resolve_include_hidden};
+use crate::{absolute_root_path, parse_selection, resolve_config_toggle, resolve_include_hidden};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -126,4 +127,30 @@ fn resolve_include_hidden_uses_hidden_override() {
 fn resolve_include_hidden_falls_back_to_default() {
     assert!(resolve_include_hidden(false, true));
     assert!(!resolve_include_hidden(false, false));
+}
+
+#[test]
+fn resolve_config_toggle_interprets_enable_disable_flags() {
+    assert_eq!(resolve_config_toggle(true, false), Some(true));
+    assert_eq!(resolve_config_toggle(false, true), Some(false));
+    assert_eq!(resolve_config_toggle(false, false), None);
+}
+
+#[test]
+fn expand_home_with_expands_supported_prefixes_only() {
+    let home = "/home/regueiro";
+    assert_eq!(
+        expand_home_with("$HOME/Projects", home),
+        "/home/regueiro/Projects"
+    );
+    assert_eq!(
+        expand_home_with("${HOME}/Projects", home),
+        "/home/regueiro/Projects"
+    );
+    assert_eq!(
+        expand_home_with("~/Projects", home),
+        "/home/regueiro/Projects"
+    );
+    assert_eq!(expand_home_with("~", home), "/home/regueiro");
+    assert_eq!(expand_home_with("/tmp/$HOME", home), "/tmp/$HOME");
 }
