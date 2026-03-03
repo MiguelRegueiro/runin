@@ -39,7 +39,6 @@ runin tmux new-session
 
 ```
 
-
 ---
 
 
@@ -64,8 +63,12 @@ Search root [/home/user]:
 >
 Default command [nvim .]:
 >
+Include root [n]:
+>
 saved
 ```
+
+If no values change, status prints `unchanged`.
 
 
 Config file location:
@@ -86,6 +89,8 @@ Example configuration:
 search_root = "/home/user"
 
 default_command = "nvim ."
+
+include_root = false
 
 ```
 
@@ -120,6 +125,8 @@ default_command = "nvim ."
 Both are mandatory and must be available in your `PATH`.
 
 If missing, `runin` prints a clear message to install `fd` and `fzf` and ensure both are in `PATH`.
+
+When `include_root = true`, the picker includes the configured `search_root` itself as a selectable entry.
 
 
 ---
