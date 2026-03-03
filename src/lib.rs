@@ -27,8 +27,7 @@ use config::{config_path, ensure_and_load_config, expand_home, write_config};
         .usage(AnsiColor::BrightGreen.on_default().bold())
         .literal(AnsiColor::Yellow.on_default())
 )]
-#[command(
-    after_help = "Usage:
+#[command(after_help = "Usage:
   runin [OPTIONS] [CMD]...
   runin config
 
@@ -38,8 +37,7 @@ Examples:
   runin tmux new-session
   runin -H nvim .
   runin -H
-  runin config"
-)]
+  runin config")]
 struct Cli {
     #[command(subcommand)]
     subcommand: Option<Commands>,
@@ -160,10 +158,7 @@ fn fzf_select_directory(
     include_hidden: bool,
 ) -> Result<Option<PathBuf>, String> {
     let mut fd_cmd = Command::new("fd");
-    fd_cmd
-        .arg("--type")
-        .arg("directory")
-        .arg("--absolute-path");
+    fd_cmd.arg("--type").arg("directory").arg("--absolute-path");
     if include_hidden {
         fd_cmd.arg("--hidden");
     }

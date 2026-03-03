@@ -100,7 +100,10 @@ fn prompt_toggle(label: &str, current: bool) -> Result<Option<bool>, String> {
             Ok(value) => return Ok(value),
             Err(()) => println!(
                 "{}",
-                style("Please enter y, n, or press Enter to keep current.", Style::Error)
+                style(
+                    "Please enter y, n, or press Enter to keep current.",
+                    Style::Error
+                )
             ),
         }
     }
