@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-03
+
 - Added hidden directory support controls:
   - Persistent config toggles via `runin config --include-hidden` / `--no-include-hidden`.
   - Added matching root toggles: `runin config --include-root` / `--no-include-root`.
