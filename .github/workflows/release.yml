@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version and changelog notes
+        id: changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          START_LINE="$(grep -nE "^## \\[$VERSION\\]" CHANGELOG.md | head -n1 | cut -d: -f1)"
+          if [ -z "${START_LINE:-}" ]; then
+            echo "No changelog section found for version $VERSION in CHANGELOG.md"
+            exit 1
+          fi
+
+          END_LINE="$(tail -n +"$((START_LINE + 1))" CHANGELOG.md | grep -nE "^## \\[" | head -n1 | cut -d: -f1 || true)"
+          if [ -n "${END_LINE:-}" ]; then
+            END_LINE="$((START_LINE + END_LINE - 1))"
+            sed -n "${START_LINE},$((END_LINE - 1))p" CHANGELOG.md > RELEASE_NOTES.md
+          else
+            sed -n "${START_LINE},\$p" CHANGELOG.md > RELEASE_NOTES.md
+          fi
+
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "Generated release notes are empty"
+            exit 1
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.changelog.outputs.tag }}
+          name: ${{ steps.changelog.outputs.tag }}
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: false
