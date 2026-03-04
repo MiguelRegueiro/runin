@@ -1,6 +1,6 @@
 [package]
 name = "runin"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "MIT"
 description = "Minimal CLI utility for selecting a project directory with fd/fzf and running a command within it."

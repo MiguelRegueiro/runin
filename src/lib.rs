@@ -7,13 +7,13 @@ mod tests;
 use clap::builder::styling::AnsiColor;
 use clap::{builder::Styles, Parser, Subcommand};
 use std::env;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, IsTerminal, Write};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::process::{Command, Stdio};
 
-use config::{config_path, ensure_and_load_config, expand_home, write_config};
+use config::{config_exists, config_path, expand_home, load_config, write_config, Config};
 
 #[derive(Parser)]
 #[command(name = "runin")]
@@ -90,7 +90,6 @@ fn run(cli: Cli) -> Result<(), String> {
     ensure_dependencies()?;
 
     let config_path = config_path()?;
-    let mut config = ensure_and_load_config(&config_path)?;
 
     if let Some(Commands::Config {
         search_root,
@@ -101,6 +100,12 @@ fn run(cli: Cli) -> Result<(), String> {
         no_include_hidden,
     }) = cli.subcommand
     {
+        let existed = config_exists(&config_path);
+        let mut config = if existed {
+            load_config(&config_path)?
+        } else {
+            Config::default()
+        };
         let old_config = config.clone();
         let include_root = resolve_config_toggle(include_root, no_include_root);
         let include_hidden = resolve_config_toggle(include_hidden, no_include_hidden);
@@ -131,7 +136,7 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
 
-        if config != old_config {
+        if !existed || config != old_config {
             write_config(&config_path, &config)?;
             println!("saved");
         } else {
@@ -140,6 +145,7 @@ fn run(cli: Cli) -> Result<(), String> {
         return Ok(());
     }
 
+    let config = load_or_bootstrap_runtime_config(&config_path)?;
     let include_hidden = resolve_include_hidden(cli.hidden, config.include_hidden);
     let selected_dir = select_directory(
         &expand_home(&config.search_root),
@@ -159,6 +165,51 @@ fn run(cli: Cli) -> Result<(), String> {
         exec_command(&selected_dir, parts);
     } else {
         exec_command(&selected_dir, cli.cmd);
+    }
+}
+
+fn load_or_bootstrap_runtime_config(config_path: &Path) -> Result<Config, String> {
+    if config_exists(config_path) {
+        return load_config(config_path);
+    }
+
+    if let Some(err) = missing_config_non_interactive_error(
+        config_path,
+        io::stdin().is_terminal(),
+        io::stdout().is_terminal(),
+    ) {
+        return Err(err);
+    }
+
+    eprintln!(
+        "No config found at {}. Launching first-run setup.",
+        config_path.display()
+    );
+
+    let mut config = Config::default();
+    config_ui::interactive_config(
+        &mut config.search_root,
+        &mut config.default_command,
+        &mut config.include_root,
+        &mut config.include_hidden,
+    )?;
+    write_config(config_path, &config)?;
+    println!("saved");
+    Ok(config)
+}
+
+fn missing_config_non_interactive_error(
+    config_path: &Path,
+    stdin_is_tty: bool,
+    stdout_is_tty: bool,
+) -> Option<String> {
+    if stdin_is_tty && stdout_is_tty {
+        None
+    } else {
+        Some(format!(
+            "Config not found at {}.\nRun `runin config` in an interactive terminal to create it.",
+            config_path.display()
+        ))
     }
 }
 

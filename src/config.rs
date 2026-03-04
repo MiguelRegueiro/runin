@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(crate) const DEFAULT_SEARCH_ROOT: &str = "$HOME/Documents";
-pub(crate) const DEFAULT_COMMAND: &str = "code .";
+pub(crate) const DEFAULT_COMMAND: &str = "nvim .";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Config {
@@ -35,13 +35,11 @@ pub(crate) fn config_path() -> Result<PathBuf, String> {
         .join("config.toml"))
 }
 
-pub(crate) fn ensure_and_load_config(path: &Path) -> Result<Config, String> {
-    if !path.exists() {
-        let cfg = Config::default();
-        write_config(path, &cfg)?;
-        return Ok(cfg);
-    }
+pub(crate) fn config_exists(path: &Path) -> bool {
+    path.exists()
+}
 
+pub(crate) fn load_config(path: &Path) -> Result<Config, String> {
     let raw = fs::read_to_string(path)
         .map_err(|e| format!("Failed reading config {}: {e}", path.display()))?;
     toml::from_str(&raw).map_err(|e| format!("Failed parsing config {}: {e}", path.display()))

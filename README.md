@@ -63,6 +63,8 @@ runin config
 
 ```
 
+If `~/.config/runin/config.toml` does not exist, running `runin` launches the same interactive setup flow automatically.
+
 Interactive flow:
 
 ```text

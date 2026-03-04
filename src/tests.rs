@@ -1,8 +1,10 @@
 use crate::config::{
-    ensure_and_load_config, expand_home_with, write_config, Config, DEFAULT_COMMAND,
-    DEFAULT_SEARCH_ROOT,
+    expand_home_with, load_config, write_config, Config, DEFAULT_COMMAND, DEFAULT_SEARCH_ROOT,
 };
-use crate::{absolute_root_path, parse_selection, resolve_config_toggle, resolve_include_hidden};
+use crate::{
+    absolute_root_path, missing_config_non_interactive_error, parse_selection,
+    resolve_config_toggle, resolve_include_hidden,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -34,11 +36,13 @@ impl Drop for TestDir {
 }
 
 #[test]
-fn ensure_and_load_config_creates_default_when_missing() {
+fn write_and_load_default_config_when_missing() {
     let dir = TestDir::new();
     let config_path = dir.path.join("config.toml");
 
-    let cfg = ensure_and_load_config(&config_path).expect("should create and load config");
+    let expected = Config::default();
+    write_config(&config_path, &expected).expect("should create default config");
+    let cfg = load_config(&config_path).expect("should load config");
 
     assert_eq!(cfg.search_root, DEFAULT_SEARCH_ROOT);
     assert_eq!(cfg.default_command, DEFAULT_COMMAND);
@@ -58,23 +62,23 @@ fn write_and_load_config_roundtrip() {
     };
 
     write_config(&config_path, &expected).expect("write config should succeed");
-    let loaded = ensure_and_load_config(&config_path).expect("load config should succeed");
+    let loaded = load_config(&config_path).expect("load config should succeed");
 
     assert_eq!(loaded, expected);
 }
 
 #[test]
-fn ensure_and_load_config_returns_error_for_invalid_toml() {
+fn load_config_returns_error_for_invalid_toml() {
     let dir = TestDir::new();
     let config_path = dir.path.join("config.toml");
     fs::write(&config_path, "not-valid-toml = [").expect("failed to write invalid test config");
 
-    let err = ensure_and_load_config(&config_path).expect_err("invalid TOML should fail");
+    let err = load_config(&config_path).expect_err("invalid TOML should fail");
     assert!(err.contains("Failed parsing config"));
 }
 
 #[test]
-fn ensure_and_load_config_defaults_toggles_when_missing() {
+fn load_config_defaults_toggles_when_missing() {
     let dir = TestDir::new();
     let config_path = dir.path.join("config.toml");
     fs::write(
@@ -83,7 +87,7 @@ fn ensure_and_load_config_defaults_toggles_when_missing() {
     )
     .expect("failed to write config without include_root");
 
-    let cfg = ensure_and_load_config(&config_path).expect("load config should succeed");
+    let cfg = load_config(&config_path).expect("load config should succeed");
     assert!(!cfg.include_root);
     assert!(!cfg.include_hidden);
 }
@@ -134,6 +138,30 @@ fn resolve_config_toggle_interprets_enable_disable_flags() {
     assert_eq!(resolve_config_toggle(true, false), Some(true));
     assert_eq!(resolve_config_toggle(false, true), Some(false));
     assert_eq!(resolve_config_toggle(false, false), None);
+}
+
+#[test]
+fn missing_config_error_allows_interactive_setup_when_tty_available() {
+    let path = Path::new("/tmp/runin-config.toml");
+    assert_eq!(missing_config_non_interactive_error(path, true, true), None);
+}
+
+#[test]
+fn missing_config_error_blocks_when_stdin_is_not_tty() {
+    let path = Path::new("/tmp/runin-config.toml");
+    let err =
+        missing_config_non_interactive_error(path, false, true).expect("expected non-tty error");
+    assert!(err.contains("Config not found"));
+    assert!(err.contains("runin config"));
+}
+
+#[test]
+fn missing_config_error_blocks_when_stdout_is_not_tty() {
+    let path = Path::new("/tmp/runin-config.toml");
+    let err =
+        missing_config_non_interactive_error(path, true, false).expect("expected non-tty error");
+    assert!(err.contains("Config not found"));
+    assert!(err.contains("runin config"));
 }
 
 #[test]

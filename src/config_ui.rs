@@ -12,7 +12,8 @@ pub fn interactive_config(
     println!("{}", style("runin setup", Style::Title));
     println!();
 
-    if let Some(value) = prompt_value("Search root", search_root)? {
+    let search_root_display = crate::config::expand_home(search_root);
+    if let Some(value) = prompt_value_with_display("Search root", &search_root_display)? {
         *search_root = value;
     }
 
@@ -31,10 +32,14 @@ pub fn interactive_config(
 }
 
 fn prompt_value(label: &str, current: &str) -> Result<Option<String>, String> {
+    prompt_value_with_display(label, current)
+}
+
+fn prompt_value_with_display(label: &str, current_display: &str) -> Result<Option<String>, String> {
     println!(
         "{} {}:",
         style(label, Style::Label),
-        style(&format!("[{current}]"), Style::Muted)
+        style(&format!("[{current_display}]"), Style::Muted)
     );
     print!("{}", style("> ", Style::Prompt));
     io::stdout()

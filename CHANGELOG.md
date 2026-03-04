@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-03-04
+
+- Improved first-run setup flow:
+  - `runin` now launches interactive configuration automatically when no config file exists.
+  - Non-interactive runs now fail fast with a clear instruction to run `runin config`.
+  - `runin config` now guarantees config creation on first use, even when keeping defaults.
+- Refined setup defaults and prompts:
+  - `Search root` now displays the expanded home path (for example `/home/user/Documents`) instead of raw `$HOME/...`.
+  - Default command is now `nvim .`.
+
 ## [0.2.0] - 2026-03-03
 
 - Added hidden directory support controls:
