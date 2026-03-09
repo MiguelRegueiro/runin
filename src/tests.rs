@@ -5,8 +5,8 @@ use crate::{
     absolute_root_path, is_broken_pipe, missing_config_non_interactive_error, parse_selection,
     resolve_config_toggle, resolve_include_hidden,
 };
-use std::io;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -126,7 +126,9 @@ fn absolute_root_path_resolves_relative_paths() {
 #[test]
 fn is_broken_pipe_matches_broken_pipe_only() {
     assert!(is_broken_pipe(&io::Error::from(io::ErrorKind::BrokenPipe)));
-    assert!(!is_broken_pipe(&io::Error::from(io::ErrorKind::PermissionDenied)));
+    assert!(!is_broken_pipe(&io::Error::from(
+        io::ErrorKind::PermissionDenied
+    )));
 }
 
 #[test]
