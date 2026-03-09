@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-03-09
+
+- Fixed a crash when `fzf` exited early after a selection and closed its stdin before directory streaming finished.
+- Treat `BrokenPipe` from the `fzf` input pipe as normal early-exit behavior instead of a fatal error.
+
 ## [0.2.1] - 2026-03-04
 
 - Improved first-run setup flow:

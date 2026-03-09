@@ -2,9 +2,10 @@ use crate::config::{
     expand_home_with, load_config, write_config, Config, DEFAULT_COMMAND, DEFAULT_SEARCH_ROOT,
 };
 use crate::{
-    absolute_root_path, missing_config_non_interactive_error, parse_selection,
+    absolute_root_path, is_broken_pipe, missing_config_non_interactive_error, parse_selection,
     resolve_config_toggle, resolve_include_hidden,
 };
+use std::io;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -120,6 +121,12 @@ fn absolute_root_path_resolves_relative_paths() {
     let root = absolute_root_path("relative-root").expect("should resolve relative path");
     assert!(Path::new(&root).is_absolute());
     assert!(root.ends_with("relative-root"));
+}
+
+#[test]
+fn is_broken_pipe_matches_broken_pipe_only() {
+    assert!(is_broken_pipe(&io::Error::from(io::ErrorKind::BrokenPipe)));
+    assert!(!is_broken_pipe(&io::Error::from(io::ErrorKind::PermissionDenied)));
 }
 
 #[test]

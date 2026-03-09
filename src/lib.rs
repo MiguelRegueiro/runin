@@ -270,6 +270,7 @@ fn fzf_select_directory(
         .spawn()
         .map_err(|e| format!("Failed to spawn fzf: {e}"))?;
 
+    let mut fzf_closed_stdin_early = false;
     {
         let mut fzf_stdin = fzf_child
             .stdin
@@ -277,13 +278,25 @@ fn fzf_select_directory(
             .ok_or("Failed to capture fzf stdin")?;
         if include_root {
             let root = absolute_root_path(search_root)?;
-            writeln!(fzf_stdin, "{root}")
-                .map_err(|e| format!("Failed writing root option to fzf: {e}"))?;
+            if let Err(err) = writeln!(fzf_stdin, "{root}") {
+                if is_broken_pipe(&err) {
+                    fzf_closed_stdin_early = true;
+                } else {
+                    return Err(format!("Failed writing root option to fzf: {err}"));
+                }
+            }
         }
 
-        let mut fd_stdout = fd_stdout;
-        io::copy(&mut fd_stdout, &mut fzf_stdin)
-            .map_err(|e| format!("Failed streaming directories to fzf: {e}"))?;
+        if !fzf_closed_stdin_early {
+            let mut fd_stdout = fd_stdout;
+            if let Err(err) = io::copy(&mut fd_stdout, &mut fzf_stdin) {
+                if is_broken_pipe(&err) {
+                    fzf_closed_stdin_early = true;
+                } else {
+                    return Err(format!("Failed streaming directories to fzf: {err}"));
+                }
+            }
+        }
     }
 
     let mut selection = String::new();
@@ -304,7 +317,7 @@ fn fzf_select_directory(
         .wait()
         .map_err(|e| format!("Failed to wait on fd: {e}"))?;
 
-    if !fd_status.success() {
+    if !fd_status.success() && !fzf_closed_stdin_early {
         return Err(format!(
             "fd failed while listing directories (search_root: {search_root}, include_hidden: {include_hidden})"
         ));
@@ -332,6 +345,10 @@ fn absolute_root_path(search_root: &str) -> Result<String, String> {
 
     let cwd = env::current_dir().map_err(|e| format!("Failed to read current directory: {e}"))?;
     Ok(cwd.join(root).to_string_lossy().into_owned())
+}
+
+fn is_broken_pipe(err: &io::Error) -> bool {
+    err.kind() == io::ErrorKind::BrokenPipe
 }
 
 fn parse_selection(selection: &str) -> Option<PathBuf> {
