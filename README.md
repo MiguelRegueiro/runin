@@ -170,6 +170,27 @@ When `cd_after_run = true`, `runin` changes the current shell to the selected di
 ---
 
 
+## Terminal Launchers
+
+If a launcher opens a terminal just for `runin`, start your shell first and keep an interactive shell open afterward:
+
+```bash
+kitty -e fish -ic 'runin; exec fish'
+```
+
+For other shells:
+
+```bash
+kitty -e bash -ic 'runin; exec bash'
+kitty -e zsh -ic 'runin; exec zsh'
+```
+
+This keeps the terminal open in the selected directory after the configured command exits. Shell integration must be installed first with `runin shell install`.
+
+
+---
+
+
 ## How it works
 
 
