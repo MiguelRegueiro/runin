@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-17
+
+- Added shell integration via `runin init bash`, `runin init zsh`, and `runin init fish`.
+- Added persistent directory changes after a command exits when shell integration is enabled.
+- Added `cd_after_run = true` config, plus `--cd` / `--no-cd` one-run overrides.
+- Added config controls: `runin config --cd-after-run` and `runin config --no-cd-after-run`.
+
 ## [0.2.2] - 2026-03-09
 
 - Fixed a crash when `fzf` exited early after a selection and closed its stdin before directory streaming finished.
