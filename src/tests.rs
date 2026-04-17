@@ -3,7 +3,8 @@ use crate::config::{
 };
 use crate::{
     absolute_root_path, is_broken_pipe, missing_config_non_interactive_error, parse_selection,
-    resolve_config_toggle, resolve_include_hidden, shell_init, write_cd_target, Shell,
+    remove_managed_block, resolve_config_toggle, resolve_include_hidden, shell_init, source_block,
+    upsert_managed_block, write_cd_target, write_shell_integration, Shell,
 };
 use std::fs;
 use std::io;
@@ -116,8 +117,37 @@ fn shell_init_embeds_binary_path_instead_of_requiring_path_lookup() {
 
     assert!(bash.contains("'/tmp/runin' --emit-cd-path"));
     assert!(fish.contains("'/tmp/runin' --emit-cd-path"));
+    assert!(bash.contains("export RUNIN_SHELL_INTEGRATION=1"));
+    assert!(fish.contains("set -gx RUNIN_SHELL_INTEGRATION 1"));
     assert!(!bash.contains("command runin"));
     assert!(!fish.contains("command runin"));
+}
+
+#[test]
+fn managed_shell_block_is_idempotent_and_removable() {
+    let block = source_block(Path::new("/tmp/runin/runin.bash"));
+    let original = "alias ll='ls -la'\n";
+
+    let once = upsert_managed_block(original, &block);
+    let twice = upsert_managed_block(&once, &block);
+
+    assert_eq!(once, twice);
+    assert!(once.contains("alias ll='ls -la'"));
+    assert!(once.contains("# >>> runin shell integration >>>"));
+    assert_eq!(remove_managed_block(&once), original);
+}
+
+#[test]
+fn write_shell_integration_creates_parent_directories() {
+    let dir = TestDir::new();
+    let install_path = dir.path.join("fish").join("conf.d").join("runin.fish");
+
+    write_shell_integration(Shell::Fish, &install_path, Path::new("/tmp/runin"))
+        .expect("shell integration should be written");
+
+    let content = fs::read_to_string(install_path).expect("script should be readable");
+    assert!(content.contains("function runin"));
+    assert!(content.contains("'/tmp/runin' --emit-cd-path"));
 }
 
 #[test]

@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-17
+
+- Added `runin shell install`, `runin shell status`, `runin shell uninstall`, and `runin doctor` to make persistent directory changes easier to set up and verify.
+
 ## [0.3.0] - 2026-04-17
 
 - Added shell integration via `runin init bash`, `runin init zsh`, and `runin init fish`.

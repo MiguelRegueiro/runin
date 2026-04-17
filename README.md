@@ -56,6 +56,14 @@ Install from crates.io:
 cargo install runin
 ```
 
+Enable persistent directory changes:
+
+```bash
+runin shell install
+```
+
+Restart your shell after installing, or run the source command printed by `runin shell install`.
+
 ---
 
 
@@ -77,11 +85,34 @@ Enable persistent directory changes in your shell:
 
 ```bash
 
-eval "$(runin init bash)"
+runin shell install
 
 ```
 
-Use `zsh` or `fish` instead of `bash` for those shells. Add the same line to your shell startup file to keep it enabled.
+`runin shell install` detects your shell from `$SHELL`. You can also pass it explicitly:
+
+```bash
+runin shell install fish
+runin shell install zsh
+runin shell install bash
+```
+
+For fish, this writes `~/.config/fish/conf.d/runin.fish`. For bash and zsh, it writes `~/.config/runin/runin.bash` or `~/.config/runin/runin.zsh` and adds a managed source block to your shell startup file.
+
+Check whether shell integration is installed and active:
+
+```bash
+runin shell status
+runin doctor
+```
+
+Remove shell integration:
+
+```bash
+runin shell uninstall
+```
+
+For manual setups, `runin init bash`, `runin init zsh`, and `runin init fish` still print the shell integration to stdout.
 
 Interactive flow:
 
@@ -133,7 +164,7 @@ cd_after_run = true
 
 When `include_root = true`, the picker includes `search_root` itself as a selectable entry.
 
-When `cd_after_run = true`, `runin` changes the current shell to the selected directory after the command exits. This requires the shell integration from `runin init`.
+When `cd_after_run = true`, `runin` changes the current shell to the selected directory after the command exits. This requires shell integration from `runin shell install`.
 
 
 ---

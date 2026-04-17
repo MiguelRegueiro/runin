@@ -29,7 +29,7 @@ use config::{config_exists, config_path, expand_home, load_config, write_config,
         .literal(AnsiColor::Yellow.on_default())
 )]
 #[command(
-    override_usage = "runin [OPTIONS] [CMD]...\n       runin config [OPTIONS]\n       runin init [SHELL]"
+    override_usage = "runin [OPTIONS] [CMD]...\n       runin config [OPTIONS]\n       runin shell <COMMAND>\n       runin doctor"
 )]
 #[command(after_help = "Examples:
   runin
@@ -38,7 +38,7 @@ use config::{config_exists, config_path, expand_home, load_config, write_config,
   runin -H nvim .
   runin -H
   runin config
-  runin init bash")]
+  runin shell install")]
 struct Cli {
     #[command(subcommand)]
     subcommand: Option<Commands>,
@@ -102,6 +102,35 @@ enum Commands {
         #[arg(value_enum)]
         shell: Option<Shell>,
     },
+    #[command(about = "Install, inspect, or remove shell integration")]
+    Shell {
+        #[command(subcommand)]
+        command: ShellCommand,
+    },
+    #[command(about = "Check runin dependencies, config, and shell integration")]
+    Doctor {
+        #[arg(value_enum)]
+        shell: Option<Shell>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ShellCommand {
+    #[command(about = "Install shell integration for persistent cd behavior")]
+    Install {
+        #[arg(value_enum)]
+        shell: Option<Shell>,
+    },
+    #[command(about = "Show shell integration status")]
+    Status {
+        #[arg(value_enum)]
+        shell: Option<Shell>,
+    },
+    #[command(about = "Remove shell integration installed by runin")]
+    Uninstall {
+        #[arg(value_enum)]
+        shell: Option<Shell>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -109,6 +138,16 @@ enum Shell {
     Bash,
     Zsh,
     Fish,
+}
+
+impl Shell {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Bash => "bash",
+            Self::Zsh => "zsh",
+            Self::Fish => "fish",
+        }
+    }
 }
 
 pub fn main_entry() {
@@ -197,6 +236,14 @@ fn run(cli: Cli) -> Result<(), String> {
                 .or_else(infer_shell)
                 .ok_or("Could not infer shell. Run `runin init bash`, `runin init zsh`, or `runin init fish`.")?;
             print_shell_init(shell)?;
+            return Ok(());
+        }
+        Some(Commands::Shell { command }) => {
+            handle_shell_command(command)?;
+            return Ok(());
+        }
+        Some(Commands::Doctor { shell }) => {
+            run_doctor(shell)?;
             return Ok(());
         }
         None => {}
@@ -293,11 +340,301 @@ fn infer_shell() -> Option<Shell> {
     }
 }
 
+fn resolve_shell(shell: Option<Shell>) -> Result<Shell, String> {
+    shell
+        .or_else(infer_shell)
+        .ok_or("Could not infer shell. Pass one explicitly: bash, zsh, or fish.".to_string())
+}
+
+fn handle_shell_command(command: ShellCommand) -> Result<(), String> {
+    match command {
+        ShellCommand::Install { shell } => install_shell_integration(resolve_shell(shell)?),
+        ShellCommand::Status { shell } => {
+            print_shell_status(resolve_shell(shell)?)?;
+            Ok(())
+        }
+        ShellCommand::Uninstall { shell } => uninstall_shell_integration(resolve_shell(shell)?),
+    }
+}
+
+fn run_doctor(shell: Option<Shell>) -> Result<(), String> {
+    println!("runin doctor");
+    println!();
+
+    match config_path() {
+        Ok(path) if path.exists() => println!("config: ok ({})", path.display()),
+        Ok(path) => println!("config: missing ({})", path.display()),
+        Err(err) => println!("config: error ({err})"),
+    }
+
+    print_dependency_status("fd");
+    print_dependency_status("fzf");
+
+    match resolve_shell(shell) {
+        Ok(shell) => {
+            println!();
+            print_shell_status(shell)?;
+        }
+        Err(err) => println!("shell: {err}"),
+    }
+
+    Ok(())
+}
+
+fn print_dependency_status(binary: &str) {
+    let available = matches!(
+        Command::new(binary)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status(),
+        Ok(status) if status.success()
+    );
+
+    if available {
+        println!("{binary}: ok");
+    } else {
+        println!("{binary}: missing");
+    }
+}
+
 fn print_shell_init(shell: Shell) -> Result<(), String> {
     let runin_bin =
         env::current_exe().map_err(|e| format!("Failed to locate runin binary: {e}"))?;
     print!("{}", shell_init(shell, &runin_bin));
     Ok(())
+}
+
+fn install_shell_integration(shell: Shell) -> Result<(), String> {
+    let runin_bin =
+        env::current_exe().map_err(|e| format!("Failed to locate runin binary: {e}"))?;
+    let install_path = shell_install_path(shell)?;
+    write_shell_integration(shell, &install_path, &runin_bin)?;
+
+    println!("installed: {}", install_path.display());
+
+    if let Some(rc_path) = shell_rc_path(shell)? {
+        install_shell_source_block(&rc_path, &install_path)?;
+        println!("updated: {}", rc_path.display());
+        println!();
+        println!("Restart your shell, or run:");
+        println!("  . {}", sh_single_quote(&install_path.to_string_lossy()));
+    } else {
+        println!();
+        println!("Restart your shell, or run:");
+        println!(
+            "  source {}",
+            fish_single_quote(&install_path.to_string_lossy())
+        );
+    }
+
+    Ok(())
+}
+
+fn uninstall_shell_integration(shell: Shell) -> Result<(), String> {
+    let install_path = shell_install_path(shell)?;
+    if install_path.exists() {
+        fs::remove_file(&install_path)
+            .map_err(|e| format!("Failed removing {}: {e}", install_path.display()))?;
+        println!("removed: {}", install_path.display());
+    } else {
+        println!("not installed: {}", install_path.display());
+    }
+
+    if let Some(rc_path) = shell_rc_path(shell)? {
+        if rc_path.exists() {
+            remove_shell_source_block(&rc_path)?;
+            println!("updated: {}", rc_path.display());
+        }
+    }
+
+    Ok(())
+}
+
+fn print_shell_status(shell: Shell) -> Result<(), String> {
+    let status = shell_status(shell)?;
+    println!("shell: {}", shell.name());
+    println!(
+        "integration file: {} ({})",
+        status.install_path.display(),
+        if status.installed {
+            "installed"
+        } else {
+            "missing"
+        }
+    );
+    if let Some(rc_path) = &status.rc_path {
+        println!(
+            "startup file: {} ({})",
+            rc_path.display(),
+            if status.startup_configured {
+                "configured"
+            } else {
+                "missing runin block"
+            }
+        );
+    }
+    println!(
+        "current shell: {}",
+        if status.active {
+            "active"
+        } else {
+            "not active; restart your shell or source the integration file"
+        }
+    );
+    Ok(())
+}
+
+struct ShellStatus {
+    install_path: PathBuf,
+    rc_path: Option<PathBuf>,
+    installed: bool,
+    startup_configured: bool,
+    active: bool,
+}
+
+fn shell_status(shell: Shell) -> Result<ShellStatus, String> {
+    let install_path = shell_install_path(shell)?;
+    let rc_path = shell_rc_path(shell)?;
+    let startup_configured = if let Some(path) = &rc_path {
+        read_optional_to_string(path)?.contains(RUNIN_BLOCK_START)
+    } else {
+        install_path.exists()
+    };
+
+    Ok(ShellStatus {
+        installed: install_path.exists(),
+        install_path,
+        rc_path,
+        startup_configured,
+        active: env::var_os("RUNIN_SHELL_INTEGRATION").as_deref()
+            == Some(std::ffi::OsStr::new("1")),
+    })
+}
+
+fn write_shell_integration(
+    shell: Shell,
+    install_path: &Path,
+    runin_bin: &Path,
+) -> Result<(), String> {
+    if let Some(parent) = install_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed creating {}: {e}", parent.display()))?;
+    }
+    fs::write(install_path, shell_init(shell, runin_bin))
+        .map_err(|e| format!("Failed writing {}: {e}", install_path.display()))
+}
+
+fn install_shell_source_block(rc_path: &Path, install_path: &Path) -> Result<(), String> {
+    if let Some(parent) = rc_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed creating {}: {e}", parent.display()))?;
+    }
+
+    let current = read_optional_to_string(rc_path)?;
+    let next = upsert_managed_block(&current, &source_block(install_path));
+    fs::write(rc_path, next).map_err(|e| format!("Failed writing {}: {e}", rc_path.display()))
+}
+
+fn remove_shell_source_block(rc_path: &Path) -> Result<(), String> {
+    let current = read_optional_to_string(rc_path)?;
+    let next = remove_managed_block(&current);
+    fs::write(rc_path, next).map_err(|e| format!("Failed writing {}: {e}", rc_path.display()))
+}
+
+fn read_optional_to_string(path: &Path) -> Result<String, String> {
+    match fs::read_to_string(path) {
+        Ok(value) => Ok(value),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(String::new()),
+        Err(err) => Err(format!("Failed reading {}: {err}", path.display())),
+    }
+}
+
+const RUNIN_BLOCK_START: &str = "# >>> runin shell integration >>>";
+const RUNIN_BLOCK_END: &str = "# <<< runin shell integration <<<";
+
+fn source_block(install_path: &Path) -> String {
+    let install_path = sh_single_quote(&install_path.to_string_lossy());
+    format!(
+        "{RUNIN_BLOCK_START}\nif [ -r {install_path} ]; then\n    . {install_path}\nfi\n{RUNIN_BLOCK_END}"
+    )
+}
+
+fn upsert_managed_block(content: &str, block: &str) -> String {
+    let without = remove_managed_block(content);
+    let without = without.trim_end_matches('\n');
+    if without.is_empty() {
+        format!("{block}\n")
+    } else {
+        format!("{without}\n\n{block}\n")
+    }
+}
+
+fn remove_managed_block(content: &str) -> String {
+    let mut lines = Vec::new();
+    let mut in_block = false;
+
+    for line in content.lines() {
+        if line == RUNIN_BLOCK_START {
+            if lines.last() == Some(&"") {
+                lines.pop();
+            }
+            in_block = true;
+            continue;
+        }
+        if line == RUNIN_BLOCK_END {
+            in_block = false;
+            continue;
+        }
+        if !in_block {
+            lines.push(line);
+        }
+    }
+
+    let mut result = lines.join("\n");
+    if !result.is_empty() && content.ends_with('\n') {
+        result.push('\n');
+    }
+    result
+}
+
+fn shell_install_path(shell: Shell) -> Result<PathBuf, String> {
+    let config = config_home()?;
+    Ok(match shell {
+        Shell::Bash => config.join("runin").join("runin.bash"),
+        Shell::Zsh => config.join("runin").join("runin.zsh"),
+        Shell::Fish => config.join("fish").join("conf.d").join("runin.fish"),
+    })
+}
+
+fn shell_rc_path(shell: Shell) -> Result<Option<PathBuf>, String> {
+    Ok(match shell {
+        Shell::Bash => Some(home_dir()?.join(".bashrc")),
+        Shell::Zsh => Some(zdotdir()?.join(".zshrc")),
+        Shell::Fish => None,
+    })
+}
+
+fn config_home() -> Result<PathBuf, String> {
+    if let Some(path) = env::var_os("XDG_CONFIG_HOME") {
+        Ok(PathBuf::from(path))
+    } else {
+        Ok(home_dir()?.join(".config"))
+    }
+}
+
+fn home_dir() -> Result<PathBuf, String> {
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or("HOME environment variable is not set".to_string())
+}
+
+fn zdotdir() -> Result<PathBuf, String> {
+    if let Some(path) = env::var_os("ZDOTDIR") {
+        Ok(PathBuf::from(path))
+    } else {
+        home_dir()
+    }
 }
 
 fn shell_init(shell: Shell, runin_bin: &Path) -> String {
@@ -311,6 +648,8 @@ fn posix_shell_init(runin_bin: &Path) -> String {
     let runin_bin = sh_single_quote(&runin_bin.to_string_lossy());
     format!(
         r#"# runin shell integration
+export RUNIN_SHELL_INTEGRATION=1
+
 runin() {{
     local _runin_target _runin_status _runin_dir
 
@@ -338,6 +677,8 @@ fn fish_shell_init(runin_bin: &Path) -> String {
     let runin_bin = fish_single_quote(&runin_bin.to_string_lossy());
     format!(
         r#"# runin shell integration
+set -gx RUNIN_SHELL_INTEGRATION 1
+
 function runin
     set -l _runin_tmpdir
     if set -q TMPDIR
