@@ -38,6 +38,14 @@ runin tmux new-session
 
 ```
 
+Run without changing your shell directory afterward:
+
+```bash
+
+runin --no-cd
+
+```
+
 ---
 
 ## Installation
@@ -65,6 +73,16 @@ runin config
 
 If `~/.config/runin/config.toml` does not exist, running `runin` launches the same interactive setup flow automatically.
 
+Enable persistent directory changes in your shell:
+
+```bash
+
+eval "$(runin init bash)"
+
+```
+
+Use `zsh` or `fish` instead of `bash` for those shells. Add the same line to your shell startup file to keep it enabled.
+
 Interactive flow:
 
 ```text
@@ -75,6 +93,10 @@ Search root [/home/user]:
 Default command [nvim .]:
 >
 Include root [n]:
+>
+Include hidden paths [n]:
+>
+Change shell directory after run [y]:
 >
 saved
 ```
@@ -103,9 +125,15 @@ default_command = "nvim ."
 
 include_root = false
 
+include_hidden = false
+
+cd_after_run = true
+
 ```
 
 When `include_root = true`, the picker includes `search_root` itself as a selectable entry.
+
+When `cd_after_run = true`, `runin` changes the current shell to the selected directory after the command exits. This requires the shell integration from `runin init`.
 
 
 ---

@@ -5,8 +5,9 @@ mod config_ui;
 mod tests;
 
 use clap::builder::styling::AnsiColor;
-use clap::{builder::Styles, Parser, Subcommand};
+use clap::{builder::Styles, Parser, Subcommand, ValueEnum};
 use std::env;
+use std::fs;
 use std::io::{self, BufRead, BufReader, IsTerminal, Write};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -27,17 +28,17 @@ use config::{config_exists, config_path, expand_home, load_config, write_config,
         .usage(AnsiColor::BrightGreen.on_default().bold())
         .literal(AnsiColor::Yellow.on_default())
 )]
-#[command(after_help = "Usage:
-  runin [OPTIONS] [CMD]...
-  runin config
-
-Examples:
+#[command(
+    override_usage = "runin [OPTIONS] [CMD]...\n       runin config [OPTIONS]\n       runin init [SHELL]"
+)]
+#[command(after_help = "Examples:
   runin
   runin nvim .
   runin tmux new-session
   runin -H nvim .
   runin -H
-  runin config")]
+  runin config
+  runin init bash")]
 struct Cli {
     #[command(subcommand)]
     subcommand: Option<Commands>,
@@ -49,6 +50,23 @@ struct Cli {
         help = "Include hidden directories in search (fd --hidden)"
     )]
     hidden: bool,
+
+    #[arg(
+        long = "cd",
+        conflicts_with = "no_cd",
+        help = "Change the parent shell to the selected directory after the command exits (requires shell integration)"
+    )]
+    cd: bool,
+
+    #[arg(
+        long = "no-cd",
+        conflicts_with = "cd",
+        help = "Do not change the parent shell directory after the command exits"
+    )]
+    no_cd: bool,
+
+    #[arg(long = "emit-cd-path", hide = true, value_name = "FILE")]
+    emit_cd_path: Option<PathBuf>,
 
     #[arg(
         value_name = "CMD",
@@ -74,7 +92,23 @@ enum Commands {
         include_hidden: bool,
         #[arg(long = "no-include-hidden", conflicts_with = "include_hidden")]
         no_include_hidden: bool,
+        #[arg(long = "cd-after-run", conflicts_with = "no_cd_after_run")]
+        cd_after_run: bool,
+        #[arg(long = "no-cd-after-run", conflicts_with = "cd_after_run")]
+        no_cd_after_run: bool,
     },
+    #[command(about = "Print shell integration for persistent cd behavior")]
+    Init {
+        #[arg(value_enum)]
+        shell: Option<Shell>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum Shell {
+    Bash,
+    Zsh,
+    Fish,
 }
 
 pub fn main_entry() {
@@ -87,66 +121,92 @@ pub fn main_entry() {
 }
 
 fn run(cli: Cli) -> Result<(), String> {
-    ensure_dependencies()?;
-
+    let Cli {
+        subcommand,
+        hidden,
+        cd,
+        no_cd,
+        emit_cd_path,
+        cmd,
+    } = cli;
     let config_path = config_path()?;
 
-    if let Some(Commands::Config {
-        search_root,
-        default_command,
-        include_root,
-        no_include_root,
-        include_hidden,
-        no_include_hidden,
-    }) = cli.subcommand
-    {
-        let existed = config_exists(&config_path);
-        let mut config = if existed {
-            load_config(&config_path)?
-        } else {
-            Config::default()
-        };
-        let old_config = config.clone();
-        let include_root = resolve_config_toggle(include_root, no_include_root);
-        let include_hidden = resolve_config_toggle(include_hidden, no_include_hidden);
+    match subcommand {
+        Some(Commands::Config {
+            search_root,
+            default_command,
+            include_root,
+            no_include_root,
+            include_hidden,
+            no_include_hidden,
+            cd_after_run,
+            no_cd_after_run,
+        }) => {
+            let existed = config_exists(&config_path);
+            let mut config = if existed {
+                load_config(&config_path)?
+            } else {
+                Config::default()
+            };
+            let old_config = config.clone();
+            let include_root = resolve_config_toggle(include_root, no_include_root);
+            let include_hidden = resolve_config_toggle(include_hidden, no_include_hidden);
+            let cd_after_run = resolve_config_toggle(cd_after_run, no_cd_after_run);
 
-        if search_root.is_none()
-            && default_command.is_none()
-            && include_root.is_none()
-            && include_hidden.is_none()
-        {
-            config_ui::interactive_config(
-                &mut config.search_root,
-                &mut config.default_command,
-                &mut config.include_root,
-                &mut config.include_hidden,
-            )?;
-        } else {
-            if let Some(value) = search_root {
-                config.search_root = value;
+            if search_root.is_none()
+                && default_command.is_none()
+                && include_root.is_none()
+                && include_hidden.is_none()
+                && cd_after_run.is_none()
+            {
+                config_ui::interactive_config(
+                    &mut config.search_root,
+                    &mut config.default_command,
+                    &mut config.include_root,
+                    &mut config.include_hidden,
+                    &mut config.cd_after_run,
+                )?;
+            } else {
+                if let Some(value) = search_root {
+                    config.search_root = value;
+                }
+                if let Some(value) = default_command {
+                    config.default_command = value;
+                }
+                if let Some(value) = include_root {
+                    config.include_root = value;
+                }
+                if let Some(value) = include_hidden {
+                    config.include_hidden = value;
+                }
+                if let Some(value) = cd_after_run {
+                    config.cd_after_run = value;
+                }
             }
-            if let Some(value) = default_command {
-                config.default_command = value;
-            }
-            if let Some(value) = include_root {
-                config.include_root = value;
-            }
-            if let Some(value) = include_hidden {
-                config.include_hidden = value;
-            }
-        }
 
-        if !existed || config != old_config {
-            write_config(&config_path, &config)?;
-            println!("saved");
-        } else {
-            println!("unchanged");
+            if !existed || config != old_config {
+                write_config(&config_path, &config)?;
+                println!("saved");
+            } else {
+                println!("unchanged");
+            }
+            return Ok(());
         }
-        return Ok(());
+        Some(Commands::Init { shell }) => {
+            let shell = shell
+                .or_else(infer_shell)
+                .ok_or("Could not infer shell. Run `runin init bash`, `runin init zsh`, or `runin init fish`.")?;
+            print_shell_init(shell)?;
+            return Ok(());
+        }
+        None => {}
     }
 
+    ensure_dependencies()?;
+
     let config = load_or_bootstrap_runtime_config(&config_path)?;
-    let include_hidden = resolve_include_hidden(cli.hidden, config.include_hidden);
+    let include_hidden = resolve_include_hidden(hidden, config.include_hidden);
+    let cd_after_run = resolve_config_toggle(cd, no_cd).unwrap_or(config.cd_after_run);
     let selected_dir = select_directory(
         &expand_home(&config.search_root),
         config.include_root,
@@ -156,16 +216,24 @@ fn run(cli: Cli) -> Result<(), String> {
         return Ok(());
     };
 
-    if cli.cmd.is_empty() {
+    let parts = if cmd.is_empty() {
         let parts = shell_words::split(&config.default_command)
             .map_err(|e| format!("Invalid default_command in config: {e}"))?;
         if parts.is_empty() {
             return Err("default_command cannot be empty".to_string());
         }
-        exec_command(&selected_dir, parts);
+        parts
     } else {
-        exec_command(&selected_dir, cli.cmd);
+        cmd
+    };
+
+    if cd_after_run {
+        if let Some(path) = &emit_cd_path {
+            write_cd_target(path, &selected_dir)?;
+        }
     }
+
+    exec_command(&selected_dir, parts, emit_cd_path.as_deref());
 }
 
 fn load_or_bootstrap_runtime_config(config_path: &Path) -> Result<Config, String> {
@@ -192,6 +260,7 @@ fn load_or_bootstrap_runtime_config(config_path: &Path) -> Result<Config, String
         &mut config.default_command,
         &mut config.include_root,
         &mut config.include_hidden,
+        &mut config.cd_after_run,
     )?;
     write_config(config_path, &config)?;
     println!("saved");
@@ -211,6 +280,102 @@ fn missing_config_non_interactive_error(
             config_path.display()
         ))
     }
+}
+
+fn infer_shell() -> Option<Shell> {
+    let shell = env::var_os("SHELL")?;
+    let name = Path::new(&shell).file_name()?.to_str()?;
+    match name {
+        "bash" => Some(Shell::Bash),
+        "zsh" => Some(Shell::Zsh),
+        "fish" => Some(Shell::Fish),
+        _ => None,
+    }
+}
+
+fn print_shell_init(shell: Shell) -> Result<(), String> {
+    let runin_bin =
+        env::current_exe().map_err(|e| format!("Failed to locate runin binary: {e}"))?;
+    print!("{}", shell_init(shell, &runin_bin));
+    Ok(())
+}
+
+fn shell_init(shell: Shell, runin_bin: &Path) -> String {
+    match shell {
+        Shell::Bash | Shell::Zsh => posix_shell_init(runin_bin),
+        Shell::Fish => fish_shell_init(runin_bin),
+    }
+}
+
+fn posix_shell_init(runin_bin: &Path) -> String {
+    let runin_bin = sh_single_quote(&runin_bin.to_string_lossy());
+    format!(
+        r#"# runin shell integration
+runin() {{
+    local _runin_target _runin_status _runin_dir
+
+    _runin_target="$(mktemp "${{TMPDIR:-/tmp}}/runin-cd.XXXXXX")" || return
+    {runin_bin} --emit-cd-path "$_runin_target" "$@"
+    _runin_status=$?
+
+    if [ -s "$_runin_target" ]; then
+        IFS= read -r _runin_dir < "$_runin_target"
+        rm -f "$_runin_target"
+        if [ -n "$_runin_dir" ]; then
+            cd -- "$_runin_dir" || return $?
+        fi
+    else
+        rm -f "$_runin_target"
+    fi
+
+    return "$_runin_status"
+}}
+"#
+    )
+}
+
+fn fish_shell_init(runin_bin: &Path) -> String {
+    let runin_bin = fish_single_quote(&runin_bin.to_string_lossy());
+    format!(
+        r#"# runin shell integration
+function runin
+    set -l _runin_tmpdir
+    if set -q TMPDIR
+        set _runin_tmpdir $TMPDIR
+    else
+        set _runin_tmpdir /tmp
+    end
+
+    set -l _runin_target (mktemp "$_runin_tmpdir/runin-cd.XXXXXX")
+    or return
+
+    {runin_bin} --emit-cd-path "$_runin_target" $argv
+    set -l _runin_status $status
+
+    if test -s "$_runin_target"
+        set -l _runin_dir
+        read -l _runin_dir < "$_runin_target"
+        rm -f "$_runin_target"
+        if test -n "$_runin_dir"
+            cd "$_runin_dir"
+            or return $status
+        end
+    else
+        rm -f "$_runin_target"
+    end
+
+    return $_runin_status
+end
+"#
+    )
+}
+
+fn sh_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn fish_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
 fn select_directory(
@@ -378,6 +543,13 @@ fn resolve_config_toggle(enable: bool, disable: bool) -> Option<bool> {
     }
 }
 
+fn write_cd_target(path: &Path, selected_dir: &Path) -> Result<(), String> {
+    let mut content = selected_dir.to_string_lossy().into_owned();
+    content.push('\n');
+    fs::write(path, content)
+        .map_err(|e| format!("Failed writing shell cd target {}: {e}", path.display()))
+}
+
 fn ensure_dependencies() -> Result<(), String> {
     let required = ["fd", "fzf"];
     let missing: Vec<&str> = required
@@ -404,12 +576,16 @@ fn ensure_dependencies() -> Result<(), String> {
     }
 }
 
-fn exec_command(selected_dir: &Path, mut parts: Vec<String>) -> ! {
+fn exec_command(selected_dir: &Path, mut parts: Vec<String>, cd_target_path: Option<&Path>) -> ! {
     let program = parts.remove(0);
     let err = Command::new(&program)
         .args(parts)
         .current_dir(selected_dir)
         .exec();
+
+    if let Some(path) = cd_target_path {
+        let _ = fs::remove_file(path);
+    }
 
     eprintln!("Failed to execute '{program}': {err}");
     process::exit(1);

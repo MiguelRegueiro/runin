@@ -14,6 +14,8 @@ pub(crate) struct Config {
     pub(crate) include_root: bool,
     #[serde(default)]
     pub(crate) include_hidden: bool,
+    #[serde(default = "default_cd_after_run")]
+    pub(crate) cd_after_run: bool,
 }
 
 impl Default for Config {
@@ -23,8 +25,13 @@ impl Default for Config {
             default_command: DEFAULT_COMMAND.to_string(),
             include_root: false,
             include_hidden: false,
+            cd_after_run: default_cd_after_run(),
         }
     }
+}
+
+fn default_cd_after_run() -> bool {
+    true
 }
 
 pub(crate) fn config_path() -> Result<PathBuf, String> {

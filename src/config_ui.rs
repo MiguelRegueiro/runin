@@ -5,6 +5,7 @@ pub fn interactive_config(
     default_command: &mut String,
     include_root: &mut bool,
     include_hidden: &mut bool,
+    cd_after_run: &mut bool,
 ) -> Result<(), String> {
     clear_if_corrupt(search_root);
     clear_if_corrupt(default_command);
@@ -26,6 +27,9 @@ pub fn interactive_config(
     }
     if let Some(value) = prompt_include_hidden(*include_hidden)? {
         *include_hidden = value;
+    }
+    if let Some(value) = prompt_cd_after_run(*cd_after_run)? {
+        *cd_after_run = value;
     }
 
     Ok(())
@@ -80,6 +84,10 @@ fn prompt_include_root(current: bool) -> Result<Option<bool>, String> {
 
 fn prompt_include_hidden(current: bool) -> Result<Option<bool>, String> {
     prompt_toggle("Include hidden paths", current)
+}
+
+fn prompt_cd_after_run(current: bool) -> Result<Option<bool>, String> {
+    prompt_toggle("Change shell directory after run", current)
 }
 
 fn prompt_toggle(label: &str, current: bool) -> Result<Option<bool>, String> {

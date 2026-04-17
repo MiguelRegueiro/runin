@@ -3,7 +3,7 @@ use crate::config::{
 };
 use crate::{
     absolute_root_path, is_broken_pipe, missing_config_non_interactive_error, parse_selection,
-    resolve_config_toggle, resolve_include_hidden,
+    resolve_config_toggle, resolve_include_hidden, shell_init, write_cd_target, Shell,
 };
 use std::fs;
 use std::io;
@@ -48,6 +48,8 @@ fn write_and_load_default_config_when_missing() {
     assert_eq!(cfg.search_root, DEFAULT_SEARCH_ROOT);
     assert_eq!(cfg.default_command, DEFAULT_COMMAND);
     assert!(!cfg.include_root);
+    assert!(!cfg.include_hidden);
+    assert!(cfg.cd_after_run);
     assert!(config_path.exists());
 }
 
@@ -60,6 +62,7 @@ fn write_and_load_config_roundtrip() {
         default_command: "qwen".to_string(),
         include_root: true,
         include_hidden: true,
+        cd_after_run: false,
     };
 
     write_config(&config_path, &expected).expect("write config should succeed");
@@ -91,6 +94,30 @@ fn load_config_defaults_toggles_when_missing() {
     let cfg = load_config(&config_path).expect("load config should succeed");
     assert!(!cfg.include_root);
     assert!(!cfg.include_hidden);
+    assert!(cfg.cd_after_run);
+}
+
+#[test]
+fn write_cd_target_writes_selected_directory() {
+    let dir = TestDir::new();
+    let target_path = dir.path.join("target");
+
+    write_cd_target(&target_path, Path::new("/home/regueiro/project"))
+        .expect("write cd target should succeed");
+
+    let target = fs::read_to_string(target_path).expect("target should be readable");
+    assert_eq!(target, "/home/regueiro/project\n");
+}
+
+#[test]
+fn shell_init_embeds_binary_path_instead_of_requiring_path_lookup() {
+    let bash = shell_init(Shell::Bash, Path::new("/tmp/runin"));
+    let fish = shell_init(Shell::Fish, Path::new("/tmp/runin"));
+
+    assert!(bash.contains("'/tmp/runin' --emit-cd-path"));
+    assert!(fish.contains("'/tmp/runin' --emit-cd-path"));
+    assert!(!bash.contains("command runin"));
+    assert!(!fish.contains("command runin"));
 }
 
 #[test]
