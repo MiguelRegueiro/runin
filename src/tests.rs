@@ -1,5 +1,6 @@
 use crate::config::{
-    expand_home_with, load_config, write_config, Config, DEFAULT_COMMAND, DEFAULT_SEARCH_ROOT,
+    expand_home_with, load_config, write_config, Config, DirectorySource, DEFAULT_COMMAND,
+    DEFAULT_SEARCH_ROOT,
 };
 use crate::{
     absolute_root_path, is_broken_pipe, missing_config_non_interactive_error, parse_selection,
@@ -48,6 +49,7 @@ fn write_and_load_default_config_when_missing() {
 
     assert_eq!(cfg.search_root, DEFAULT_SEARCH_ROOT);
     assert_eq!(cfg.default_command, DEFAULT_COMMAND);
+    assert_eq!(cfg.directory_source, DirectorySource::Zoxide);
     assert!(!cfg.include_root);
     assert!(!cfg.include_hidden);
     assert!(cfg.cd_after_run);
@@ -61,6 +63,7 @@ fn write_and_load_config_roundtrip() {
     let expected = Config {
         search_root: "/home/regueiro".to_string(),
         default_command: "qwen".to_string(),
+        directory_source: DirectorySource::Fd,
         include_root: true,
         include_hidden: true,
         cd_after_run: false,
@@ -96,6 +99,7 @@ fn load_config_defaults_toggles_when_missing() {
     assert!(!cfg.include_root);
     assert!(!cfg.include_hidden);
     assert!(cfg.cd_after_run);
+    assert_eq!(cfg.directory_source, DirectorySource::Zoxide);
 }
 
 #[test]

@@ -14,7 +14,9 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::process::{Command, Stdio};
 
-use config::{config_exists, config_path, expand_home, load_config, write_config, Config};
+use config::{
+    config_exists, config_path, expand_home, load_config, write_config, Config, DirectorySource,
+};
 
 #[derive(Parser)]
 #[command(name = "runin")]
@@ -84,6 +86,8 @@ enum Commands {
         search_root: Option<String>,
         #[arg(long)]
         default_command: Option<String>,
+        #[arg(long, value_enum)]
+        directory_source: Option<DirectorySource>,
         #[arg(long, conflicts_with = "no_include_root")]
         include_root: bool,
         #[arg(long = "no-include-root", conflicts_with = "include_root")]
@@ -174,6 +178,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Some(Commands::Config {
             search_root,
             default_command,
+            directory_source,
             include_root,
             no_include_root,
             include_hidden,
@@ -194,6 +199,7 @@ fn run(cli: Cli) -> Result<(), String> {
 
             if search_root.is_none()
                 && default_command.is_none()
+                && directory_source.is_none()
                 && include_root.is_none()
                 && include_hidden.is_none()
                 && cd_after_run.is_none()
@@ -201,6 +207,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 config_ui::interactive_config(
                     &mut config.search_root,
                     &mut config.default_command,
+                    &mut config.directory_source,
                     &mut config.include_root,
                     &mut config.include_hidden,
                     &mut config.cd_after_run,
@@ -211,6 +218,9 @@ fn run(cli: Cli) -> Result<(), String> {
                 }
                 if let Some(value) = default_command {
                     config.default_command = value;
+                }
+                if let Some(value) = directory_source {
+                    config.directory_source = value;
                 }
                 if let Some(value) = include_root {
                     config.include_root = value;
@@ -249,12 +259,12 @@ fn run(cli: Cli) -> Result<(), String> {
         None => {}
     }
 
-    ensure_dependencies()?;
-
     let config = load_or_bootstrap_runtime_config(&config_path)?;
+    ensure_dependencies(config.directory_source)?;
     let include_hidden = resolve_include_hidden(hidden, config.include_hidden);
     let cd_after_run = resolve_config_toggle(cd, no_cd).unwrap_or(config.cd_after_run);
     let selected_dir = select_directory(
+        config.directory_source,
         &expand_home(&config.search_root),
         config.include_root,
         include_hidden,
@@ -305,6 +315,7 @@ fn load_or_bootstrap_runtime_config(config_path: &Path) -> Result<Config, String
     config_ui::interactive_config(
         &mut config.search_root,
         &mut config.default_command,
+        &mut config.directory_source,
         &mut config.include_root,
         &mut config.include_hidden,
         &mut config.cd_after_run,
@@ -361,13 +372,29 @@ fn run_doctor(shell: Option<Shell>) -> Result<(), String> {
     println!("runin doctor");
     println!();
 
-    match config_path() {
-        Ok(path) if path.exists() => println!("config: ok ({})", path.display()),
-        Ok(path) => println!("config: missing ({})", path.display()),
-        Err(err) => println!("config: error ({err})"),
-    }
+    let source = match config_path() {
+        Ok(path) if path.exists() => match load_config(&path) {
+            Ok(config) => {
+                println!("config: ok ({})", path.display());
+                config.directory_source
+            }
+            Err(err) => {
+                println!("config: error ({err})");
+                DirectorySource::Zoxide
+            }
+        },
+        Ok(path) => {
+            println!("config: missing ({})", path.display());
+            DirectorySource::Zoxide
+        }
+        Err(err) => {
+            println!("config: error ({err})");
+            DirectorySource::Zoxide
+        }
+    };
 
-    print_dependency_status("fd");
+    println!("directory source: {}", source.name());
+    print_dependency_status(source.name());
     print_dependency_status("fzf");
 
     match resolve_shell(shell) {
@@ -720,11 +747,50 @@ fn fish_single_quote(value: &str) -> String {
 }
 
 fn select_directory(
+    source: DirectorySource,
     search_root: &str,
     include_root: bool,
     include_hidden: bool,
 ) -> Result<Option<PathBuf>, String> {
-    fzf_select_directory(search_root, include_root, include_hidden)
+    match source {
+        DirectorySource::Zoxide => zoxide_select_directory(search_root),
+        DirectorySource::Fd => fzf_select_directory(search_root, include_root, include_hidden),
+    }
+}
+
+fn zoxide_select_directory(search_root: &str) -> Result<Option<PathBuf>, String> {
+    let root_path = Path::new(search_root);
+    if !root_path.exists() {
+        return Err(format!("Search root does not exist: {search_root}"));
+    }
+    if !root_path.is_dir() {
+        return Err(format!("Search root is not a directory: {search_root}"));
+    }
+
+    let output = Command::new("zoxide")
+        .arg("query")
+        .arg("--interactive")
+        .arg("--base-dir")
+        .arg(search_root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .output()
+        .map_err(|e| format!("Failed to run zoxide: {e}"))?;
+
+    if let Some(code) = output.status.code() {
+        if code == 130 {
+            process::exit(130);
+        }
+        if code != 0 {
+            return Ok(None);
+        }
+    } else if !output.status.success() {
+        return Err("zoxide terminated by signal".to_string());
+    }
+
+    let selection = String::from_utf8(output.stdout)
+        .map_err(|e| format!("zoxide returned a non-UTF-8 path: {e}"))?;
+    Ok(parse_selection(&selection))
 }
 
 fn fzf_select_directory(
@@ -891,8 +957,8 @@ fn write_cd_target(path: &Path, selected_dir: &Path) -> Result<(), String> {
         .map_err(|e| format!("Failed writing shell cd target {}: {e}", path.display()))
 }
 
-fn ensure_dependencies() -> Result<(), String> {
-    let required = ["fd", "fzf"];
+fn ensure_dependencies(source: DirectorySource) -> Result<(), String> {
+    let required = [source.name(), "fzf"];
     let missing: Vec<&str> = required
         .into_iter()
         .filter(|binary| {
@@ -911,8 +977,8 @@ fn ensure_dependencies() -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "Missing required dependencies: {}.\nInstall `fd` and `fzf`, and ensure both are available in PATH.",
-            missing.join(", ")
+            "Missing required dependencies: {}.\nInstall `{}` and `fzf`, and ensure both are available in PATH.",
+            missing.join(", "), source.name()
         ))
     }
 }

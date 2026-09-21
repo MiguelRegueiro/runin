@@ -3,7 +3,7 @@
 [![CI](https://github.com/MiguelRegueiro/runin/actions/workflows/ci.yml/badge.svg)](https://github.com/MiguelRegueiro/runin/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/runin.svg)](https://crates.io/crates/runin)
 
-Pick a project directory with `fd + fzf` and run a command inside it.
+Pick a directory with `zoxide + fzf` and run a command inside it.
 
 
 ---
@@ -123,6 +123,8 @@ Search root [/home/user]:
 >
 Default command [nvim .]:
 >
+Directory source (zoxide/fd) [zoxide]:
+>
 Include root [n]:
 >
 Include hidden paths [n]:
@@ -154,6 +156,8 @@ search_root = "/home/user"
 
 default_command = "nvim ."
 
+directory_source = "zoxide"
+
 include_root = false
 
 include_hidden = false
@@ -163,6 +167,17 @@ cd_after_run = true
 ```
 
 When `include_root = true`, the picker includes `search_root` itself as a selectable entry.
+
+`directory_source` chooses how directories are found. `zoxide` (the default) prioritizes directories you visit most; `fd` lists every directory under `search_root`. The `include_root` and `include_hidden` settings apply only to `fd`.
+
+Switch sources without opening the interactive setup:
+
+```bash
+runin config --directory-source fd
+runin config --directory-source zoxide
+```
+
+For `zoxide` to learn your directory history, enable its shell integration as described in the [zoxide documentation](https://github.com/ajeetdsouza/zoxide#installation). `runin` uses `zoxide query --interactive --base-dir <search_root>`, so results remain inside your configured search root.
 
 When `cd_after_run = true`, `runin` changes the current shell to the selected directory after the command exits. This requires shell integration from `runin shell install`.
 
@@ -194,9 +209,9 @@ This keeps the terminal open in the selected directory after the configured comm
 ## How it works
 
 
-- Uses `fd` to list directories under `search_root`
+- Uses `zoxide query --interactive` by default to rank frequently used directories under `search_root`
 
-- Pipes results into `fzf` for interactive selection
+- Can instead use `fd` to list every directory under `search_root`
 
 - Executes the selected command inside the chosen directory
 
@@ -207,7 +222,7 @@ This keeps the terminal open in the selected directory after the configured comm
 ## Dependencies
 
 Required tools:
-- `fd`
+- `zoxide` (default directory source) or `fd` (when configured)
 - `fzf`
 
 Both must be available in your `PATH`.

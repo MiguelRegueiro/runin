@@ -1,3 +1,4 @@
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
@@ -6,10 +7,36 @@ use std::path::{Path, PathBuf};
 pub(crate) const DEFAULT_SEARCH_ROOT: &str = "$HOME/Documents";
 pub(crate) const DEFAULT_COMMAND: &str = "nvim .";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum DirectorySource {
+    Zoxide,
+    Fd,
+}
+
+impl DirectorySource {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Zoxide => "zoxide",
+            Self::Fd => "fd",
+        }
+    }
+
+    pub(crate) fn parse_input(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "zoxide" => Some(Self::Zoxide),
+            "fd" => Some(Self::Fd),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Config {
     pub(crate) search_root: String,
     pub(crate) default_command: String,
+    #[serde(default = "default_directory_source")]
+    pub(crate) directory_source: DirectorySource,
     #[serde(default)]
     pub(crate) include_root: bool,
     #[serde(default)]
@@ -23,11 +50,16 @@ impl Default for Config {
         Self {
             search_root: DEFAULT_SEARCH_ROOT.to_string(),
             default_command: DEFAULT_COMMAND.to_string(),
+            directory_source: default_directory_source(),
             include_root: false,
             include_hidden: false,
             cd_after_run: default_cd_after_run(),
         }
     }
+}
+
+fn default_directory_source() -> DirectorySource {
+    DirectorySource::Zoxide
 }
 
 fn default_cd_after_run() -> bool {

@@ -1,8 +1,11 @@
 use std::io::{self, Write};
 
+use crate::config::DirectorySource;
+
 pub fn interactive_config(
     search_root: &mut String,
     default_command: &mut String,
+    directory_source: &mut DirectorySource,
     include_root: &mut bool,
     include_hidden: &mut bool,
     cd_after_run: &mut bool,
@@ -22,6 +25,10 @@ pub fn interactive_config(
         *default_command = value;
     }
 
+    if let Some(value) = prompt_directory_source(*directory_source)? {
+        *directory_source = value;
+    }
+
     if let Some(value) = prompt_include_root(*include_root)? {
         *include_root = value;
     }
@@ -33,6 +40,26 @@ pub fn interactive_config(
     }
 
     Ok(())
+}
+
+fn prompt_directory_source(current: DirectorySource) -> Result<Option<DirectorySource>, String> {
+    loop {
+        let value = prompt_value_with_display("Directory source (zoxide/fd)", current.name())?;
+        let Some(value) = value else {
+            return Ok(None);
+        };
+
+        match DirectorySource::parse_input(&value) {
+            Some(source) => return Ok(Some(source)),
+            None => println!(
+                "{}",
+                style(
+                    "Please enter zoxide, fd, or press Enter to keep current.",
+                    Style::Error
+                )
+            ),
+        }
+    }
 }
 
 fn prompt_value(label: &str, current: &str) -> Result<Option<String>, String> {
