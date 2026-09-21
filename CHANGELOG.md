@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+- Made `zoxide` the default directory source, with `fd` remaining available through configuration.
+- Updated the project to Rust 2024 and raised the minimum supported Rust version to 1.85.
+
 ## [0.4.0] - 2026-04-17
 
 - Added `runin shell install`, `runin shell status`, `runin shell uninstall`, and `runin doctor` to make persistent directory changes easier to set up and verify.

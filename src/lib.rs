@@ -5,7 +5,7 @@ mod config_ui;
 mod tests;
 
 use clap::builder::styling::AnsiColor;
-use clap::{builder::Styles, Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum, builder::Styles};
 use std::env;
 use std::fs;
 use std::io::{self, BufRead, BufReader, IsTerminal, Write};
@@ -15,7 +15,7 @@ use std::process;
 use std::process::{Command, Stdio};
 
 use config::{
-    config_exists, config_path, expand_home, load_config, write_config, Config, DirectorySource,
+    Config, DirectorySource, config_exists, config_path, expand_home, load_config, write_config,
 };
 
 #[derive(Parser)]
@@ -933,11 +933,7 @@ fn parse_selection(selection: &str) -> Option<PathBuf> {
 }
 
 fn resolve_include_hidden(hidden: bool, default_include_hidden: bool) -> bool {
-    if hidden {
-        true
-    } else {
-        default_include_hidden
-    }
+    if hidden { true } else { default_include_hidden }
 }
 
 fn resolve_config_toggle(enable: bool, disable: bool) -> Option<bool> {
@@ -978,7 +974,8 @@ fn ensure_dependencies(source: DirectorySource) -> Result<(), String> {
     } else {
         Err(format!(
             "Missing required dependencies: {}.\nInstall `{}` and `fzf`, and ensure both are available in PATH.",
-            missing.join(", "), source.name()
+            missing.join(", "),
+            source.name()
         ))
     }
 }

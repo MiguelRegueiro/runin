@@ -1,11 +1,11 @@
 use crate::config::{
-    expand_home_with, load_config, write_config, Config, DirectorySource, DEFAULT_COMMAND,
-    DEFAULT_SEARCH_ROOT,
+    Config, DEFAULT_COMMAND, DEFAULT_SEARCH_ROOT, DirectorySource, expand_home_with, load_config,
+    write_config,
 };
 use crate::{
-    absolute_root_path, is_broken_pipe, missing_config_non_interactive_error, parse_selection,
-    remove_managed_block, resolve_config_toggle, resolve_include_hidden, shell_init, source_block,
-    upsert_managed_block, write_cd_target, write_shell_integration, Shell,
+    Shell, absolute_root_path, is_broken_pipe, missing_config_non_interactive_error,
+    parse_selection, remove_managed_block, resolve_config_toggle, resolve_include_hidden,
+    shell_init, source_block, upsert_managed_block, write_cd_target, write_shell_integration,
 };
 use std::fs;
 use std::io;
