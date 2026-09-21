@@ -4,8 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-21
+
 - Made `zoxide` the default directory source, with `fd` remaining available through configuration.
-- Updated the project to Rust 2024 and raised the minimum supported Rust version to 1.85.
+- Added native-style zoxide selection with frecency scores, directory previews, full history, and `~/…` paths.
+- Improved fd selection with `~/…` paths and clearer fd-only configuration prompts.
+- Fixed selecting `~` from the fd picker.
+- Updated to Rust 2024, raised the minimum supported Rust version to 1.85, refreshed dependencies, and reduced release binary size.
+- Added terminal launcher examples to the README.
 
 ## [0.4.0] - 2026-04-17
 
