@@ -16,24 +16,25 @@ pub fn interactive_config(
     println!("{}", style("runin setup", Style::Title));
     println!();
 
-    let search_root_display = crate::config::expand_home(search_root);
-    if let Some(value) = prompt_value_with_display("Search root", &search_root_display)? {
-        *search_root = value;
-    }
-
-    if let Some(value) = prompt_value("Default command", default_command)? {
-        *default_command = value;
-    }
-
     if let Some(value) = prompt_directory_source(*directory_source)? {
         *directory_source = value;
     }
 
-    if let Some(value) = prompt_include_root(*include_root)? {
-        *include_root = value;
+    if *directory_source == DirectorySource::Fd {
+        let search_root_display = crate::config::expand_home(search_root);
+        if let Some(value) = prompt_value_with_display("Search root", &search_root_display)? {
+            *search_root = value;
+        }
+        if let Some(value) = prompt_include_root(*include_root)? {
+            *include_root = value;
+        }
+        if let Some(value) = prompt_include_hidden(*include_hidden)? {
+            *include_hidden = value;
+        }
     }
-    if let Some(value) = prompt_include_hidden(*include_hidden)? {
-        *include_hidden = value;
+
+    if let Some(value) = prompt_value("Default command", default_command)? {
+        *default_command = value;
     }
     if let Some(value) = prompt_cd_after_run(*cd_after_run)? {
         *cd_after_run = value;
@@ -106,7 +107,7 @@ fn normalize_input(raw: &str) -> Option<String> {
 }
 
 fn prompt_include_root(current: bool) -> Result<Option<bool>, String> {
-    prompt_toggle("Include root", current)
+    prompt_toggle("Add search root itself as a selectable entry", current)
 }
 
 fn prompt_include_hidden(current: bool) -> Result<Option<bool>, String> {

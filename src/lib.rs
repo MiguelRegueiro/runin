@@ -49,7 +49,7 @@ struct Cli {
         short = 'H',
         long = "hidden",
         global = true,
-        help = "Include hidden directories in search (fd --hidden)"
+        help = "Include hidden directories when using fd"
     )]
     hidden: bool,
 
@@ -82,7 +82,7 @@ struct Cli {
 enum Commands {
     #[command(about = "Open interactive configuration")]
     Config {
-        #[arg(long)]
+        #[arg(long, help = "Directory scope when using fd")]
         search_root: Option<String>,
         #[arg(long)]
         default_command: Option<String>,
@@ -758,20 +758,11 @@ fn select_directory(
     }
 }
 
-fn zoxide_select_directory(search_root: &str) -> Result<Option<PathBuf>, String> {
-    let root_path = Path::new(search_root);
-    if !root_path.exists() {
-        return Err(format!("Search root does not exist: {search_root}"));
-    }
-    if !root_path.is_dir() {
-        return Err(format!("Search root is not a directory: {search_root}"));
-    }
-
+fn zoxide_select_directory(_search_root: &str) -> Result<Option<PathBuf>, String> {
     let output = Command::new("zoxide")
         .arg("query")
-        .arg("--interactive")
-        .arg("--base-dir")
-        .arg(search_root)
+        .arg("--list")
+        .arg("--score")
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .output()
@@ -788,9 +779,57 @@ fn zoxide_select_directory(search_root: &str) -> Result<Option<PathBuf>, String>
         return Err("zoxide terminated by signal".to_string());
     }
 
-    let selection = String::from_utf8(output.stdout)
+    let candidates = String::from_utf8(output.stdout)
         .map_err(|e| format!("zoxide returned a non-UTF-8 path: {e}"))?;
-    Ok(parse_selection(&selection))
+    let candidates = abbreviate_zoxide_candidates(&candidates);
+    let Some(selection) = fzf_select_zoxide_candidates(&candidates)? else {
+        return Ok(None);
+    };
+
+    Ok(selection_path(&selection))
+}
+
+fn abbreviate_zoxide_candidates(candidates: &str) -> String {
+    let home = env::var_os("HOME");
+    abbreviate_zoxide_candidates_with(candidates, home.as_deref().and_then(|value| value.to_str()))
+}
+
+fn abbreviate_zoxide_candidates_with(candidates: &str, home: Option<&str>) -> String {
+    candidates
+        .lines()
+        .map(|candidate| {
+            let trimmed = candidate.trim_start();
+            let score_padding = &candidate[..candidate.len() - trimmed.len()];
+            let Some((score, path)) = trimmed.split_once(char::is_whitespace) else {
+                return candidate.to_string();
+            };
+            let path = path.trim_start();
+            format!(
+                "{score_padding}{score}\t{}\t{path}",
+                abbreviate_home_with(path, home)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn abbreviate_home_path(path: &str) -> String {
+    let home = env::var_os("HOME");
+    abbreviate_home_with(path, home.as_deref().and_then(|value| value.to_str()))
+}
+
+fn abbreviate_home_with(path: &str, home: Option<&str>) -> String {
+    let Some(home) = home else {
+        return path.to_string();
+    };
+
+    if path == home {
+        "~".to_string()
+    } else if let Some(rest) = path.strip_prefix(home).filter(|rest| rest.starts_with('/')) {
+        format!("~{rest}")
+    } else {
+        path.to_string()
+    }
 }
 
 fn fzf_select_directory(
@@ -824,7 +863,119 @@ fn fzf_select_directory(
         .take()
         .ok_or("Failed to capture fd stdout")?;
 
-    let mut fzf_child = Command::new("fzf")
+    let mut fzf_child = spawn_fzf()?;
+
+    let mut fzf_closed_stdin_early = false;
+    {
+        let mut fzf_stdin = fzf_child
+            .stdin
+            .take()
+            .ok_or("Failed to capture fzf stdin")?;
+        if include_root {
+            let root = absolute_root_path(search_root)?;
+            if let Err(err) = writeln!(fzf_stdin, "{}", abbreviate_home_path(&root)) {
+                if is_broken_pipe(&err) {
+                    fzf_closed_stdin_early = true;
+                } else {
+                    return Err(format!("Failed writing root option to fzf: {err}"));
+                }
+            }
+        }
+
+        if !fzf_closed_stdin_early {
+            for directory in BufReader::new(fd_stdout).lines() {
+                let directory =
+                    directory.map_err(|e| format!("Failed reading directories from fd: {e}"))?;
+                if let Err(err) = writeln!(fzf_stdin, "{}", abbreviate_home_path(&directory)) {
+                    if is_broken_pipe(&err) {
+                        fzf_closed_stdin_early = true;
+                        break;
+                    }
+                    return Err(format!("Failed streaming directories to fzf: {err}"));
+                }
+            }
+        }
+    }
+
+    let selection = read_fzf_selection(&mut fzf_child)?;
+    let fd_status = fd_child
+        .wait()
+        .map_err(|e| format!("Failed to wait on fd: {e}"))?;
+
+    if !fd_status.success() && !fzf_closed_stdin_early {
+        return Err(format!(
+            "fd failed while listing directories (search_root: {search_root}, include_hidden: {include_hidden})"
+        ));
+    }
+
+    Ok(selection.as_deref().and_then(selection_path))
+}
+
+fn fzf_select_zoxide_candidates(candidates: &str) -> Result<Option<String>, String> {
+    let mut fzf_child = spawn_zoxide_fzf()?;
+    {
+        let mut fzf_stdin = fzf_child
+            .stdin
+            .take()
+            .ok_or("Failed to capture fzf stdin")?;
+        if let Err(err) = fzf_stdin.write_all(candidates.as_bytes()) {
+            if !is_broken_pipe(&err) {
+                return Err(format!("Failed writing zoxide candidates to fzf: {err}"));
+            }
+        }
+    }
+
+    read_fzf_selection(&mut fzf_child)
+}
+
+fn spawn_zoxide_fzf() -> Result<std::process::Child, String> {
+    Command::new("fzf")
+        .arg("--exact")
+        .arg("--no-sort")
+        .arg("--cycle")
+        .arg("--keep-right")
+        .arg("--tabstop")
+        .arg("1")
+        .arg("--bind")
+        .arg("ctrl-z:ignore,btab:up,tab:down")
+        .arg("--layout")
+        .arg("reverse")
+        .arg("--height")
+        .arg("100%")
+        .arg("--border")
+        .arg("--info")
+        .arg("inline")
+        .arg("--delimiter")
+        .arg("\t")
+        .arg("--nth")
+        .arg("2")
+        .arg("--with-nth")
+        .arg("1,2")
+        .arg("--accept-nth")
+        .arg("3")
+        .arg("--preview-window")
+        .arg("down,30%,sharp")
+        .arg("--preview")
+        .arg(zoxide_preview_command())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn fzf: {e}"))
+}
+
+#[cfg(target_os = "linux")]
+fn zoxide_preview_command() -> &'static str {
+    "command ls -Cp --color=always --group-directories-first {3}"
+}
+
+#[cfg(not(target_os = "linux"))]
+fn zoxide_preview_command() -> &'static str {
+    "command ls -Cp {3}"
+}
+
+fn spawn_fzf() -> Result<std::process::Child, String> {
+    Command::new("fzf")
         .arg("--height")
         .arg("60%")
         .arg("--layout")
@@ -840,37 +991,10 @@ fn fzf_select_directory(
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|e| format!("Failed to spawn fzf: {e}"))?;
+        .map_err(|e| format!("Failed to spawn fzf: {e}"))
+}
 
-    let mut fzf_closed_stdin_early = false;
-    {
-        let mut fzf_stdin = fzf_child
-            .stdin
-            .take()
-            .ok_or("Failed to capture fzf stdin")?;
-        if include_root {
-            let root = absolute_root_path(search_root)?;
-            if let Err(err) = writeln!(fzf_stdin, "{root}") {
-                if is_broken_pipe(&err) {
-                    fzf_closed_stdin_early = true;
-                } else {
-                    return Err(format!("Failed writing root option to fzf: {err}"));
-                }
-            }
-        }
-
-        if !fzf_closed_stdin_early {
-            let mut fd_stdout = fd_stdout;
-            if let Err(err) = io::copy(&mut fd_stdout, &mut fzf_stdin) {
-                if is_broken_pipe(&err) {
-                    fzf_closed_stdin_early = true;
-                } else {
-                    return Err(format!("Failed streaming directories to fzf: {err}"));
-                }
-            }
-        }
-    }
-
+fn read_fzf_selection(fzf_child: &mut std::process::Child) -> Result<Option<String>, String> {
     let mut selection = String::new();
     {
         let mut stdout = fzf_child
@@ -885,16 +1009,6 @@ fn fzf_select_directory(
     let status = fzf_child
         .wait()
         .map_err(|e| format!("Failed to wait on fzf: {e}"))?;
-    let fd_status = fd_child
-        .wait()
-        .map_err(|e| format!("Failed to wait on fd: {e}"))?;
-
-    if !fd_status.success() && !fzf_closed_stdin_early {
-        return Err(format!(
-            "fd failed while listing directories (search_root: {search_root}, include_hidden: {include_hidden})"
-        ));
-    }
-
     if let Some(code) = status.code() {
         if code == 130 {
             process::exit(130);
@@ -906,7 +1020,7 @@ fn fzf_select_directory(
         return Err("fzf terminated by signal".to_string());
     }
 
-    Ok(parse_selection(&selection))
+    Ok(Some(selection))
 }
 
 fn absolute_root_path(search_root: &str) -> Result<String, String> {
@@ -930,6 +1044,11 @@ fn parse_selection(selection: &str) -> Option<PathBuf> {
     }
 
     Some(PathBuf::from(selected))
+}
+
+fn selection_path(selection: &str) -> Option<PathBuf> {
+    let selected = parse_selection(selection)?;
+    Some(PathBuf::from(expand_home(&selected.to_string_lossy())))
 }
 
 fn resolve_include_hidden(hidden: bool, default_include_hidden: bool) -> bool {

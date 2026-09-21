@@ -3,9 +3,10 @@ use crate::config::{
     write_config,
 };
 use crate::{
-    Shell, absolute_root_path, is_broken_pipe, missing_config_non_interactive_error,
-    parse_selection, remove_managed_block, resolve_config_toggle, resolve_include_hidden,
-    shell_init, source_block, upsert_managed_block, write_cd_target, write_shell_integration,
+    Shell, abbreviate_home_with, abbreviate_zoxide_candidates_with, absolute_root_path,
+    is_broken_pipe, missing_config_non_interactive_error, parse_selection, remove_managed_block,
+    resolve_config_toggle, resolve_include_hidden, selection_path, shell_init, source_block,
+    upsert_managed_block, write_cd_target, write_shell_integration,
 };
 use std::fs;
 use std::io;
@@ -61,7 +62,7 @@ fn write_and_load_config_roundtrip() {
     let dir = TestDir::new();
     let config_path = dir.path.join("config.toml");
     let expected = Config {
-        search_root: "/home/regueiro".to_string(),
+        search_root: "/home/antonio".to_string(),
         default_command: "qwen".to_string(),
         directory_source: DirectorySource::Fd,
         include_root: true,
@@ -91,7 +92,7 @@ fn load_config_defaults_toggles_when_missing() {
     let config_path = dir.path.join("config.toml");
     fs::write(
         &config_path,
-        "search_root = \"/home/regueiro\"\ndefault_command = \"qwen\"\n",
+        "search_root = \"/home/antonio\"\ndefault_command = \"qwen\"\n",
     )
     .expect("failed to write config without include_root");
 
@@ -107,11 +108,11 @@ fn write_cd_target_writes_selected_directory() {
     let dir = TestDir::new();
     let target_path = dir.path.join("target");
 
-    write_cd_target(&target_path, Path::new("/home/regueiro/project"))
+    write_cd_target(&target_path, Path::new("/home/antonio/project"))
         .expect("write cd target should succeed");
 
     let target = fs::read_to_string(target_path).expect("target should be readable");
-    assert_eq!(target, "/home/regueiro/project\n");
+    assert_eq!(target, "/home/antonio/project\n");
 }
 
 #[test]
@@ -156,19 +157,28 @@ fn write_shell_integration_creates_parent_directories() {
 
 #[test]
 fn parse_selection_handles_root_path() {
-    let parsed = parse_selection("/home/regueiro\n").expect("should parse root");
-    assert_eq!(parsed, PathBuf::from("/home/regueiro"));
+    let parsed = parse_selection("/home/antonio\n").expect("should parse root");
+    assert_eq!(parsed, PathBuf::from("/home/antonio"));
 }
 
 #[test]
 fn parse_selection_handles_regular_path() {
-    let parsed = parse_selection("/home/regueiro/project\n").expect("should parse path");
-    assert_eq!(parsed, PathBuf::from("/home/regueiro/project"));
+    let parsed = parse_selection("/home/antonio/project\n").expect("should parse path");
+    assert_eq!(parsed, PathBuf::from("/home/antonio/project"));
 }
 
 #[test]
 fn parse_selection_ignores_empty_input() {
     assert_eq!(parse_selection("  \n"), None);
+}
+
+#[test]
+fn selection_path_expands_home_after_trimming_fzf_output() {
+    let selected = selection_path("~\n").expect("should parse selection");
+    assert_eq!(
+        selected,
+        PathBuf::from(std::env::var("HOME").expect("HOME should be set"))
+    );
 }
 
 #[test]
@@ -236,19 +246,43 @@ fn missing_config_error_blocks_when_stdout_is_not_tty() {
 
 #[test]
 fn expand_home_with_expands_supported_prefixes_only() {
-    let home = "/home/regueiro";
+    let home = "/home/antonio";
     assert_eq!(
         expand_home_with("$HOME/Projects", home),
-        "/home/regueiro/Projects"
+        "/home/antonio/Projects"
     );
     assert_eq!(
         expand_home_with("${HOME}/Projects", home),
-        "/home/regueiro/Projects"
+        "/home/antonio/Projects"
     );
     assert_eq!(
         expand_home_with("~/Projects", home),
-        "/home/regueiro/Projects"
+        "/home/antonio/Projects"
     );
-    assert_eq!(expand_home_with("~", home), "/home/regueiro");
+    assert_eq!(expand_home_with("~", home), "/home/antonio");
     assert_eq!(expand_home_with("/tmp/$HOME", home), "/tmp/$HOME");
+}
+
+#[test]
+fn abbreviate_home_with_replaces_only_a_home_path_prefix() {
+    assert_eq!(
+        abbreviate_home_with("/home/antonio/project", Some("/home/antonio")),
+        "~/project"
+    );
+    assert_eq!(
+        abbreviate_home_with("/home/antonio", Some("/home/antonio")),
+        "~"
+    );
+    assert_eq!(
+        abbreviate_home_with("/home/antonio-other", Some("/home/antonio")),
+        "/home/antonio-other"
+    );
+}
+
+#[test]
+fn abbreviate_zoxide_candidates_keeps_scores_and_shortens_home_paths() {
+    assert_eq!(
+        abbreviate_zoxide_candidates_with(" 218.0 /home/antonio/project\n", Some("/home/antonio")),
+        " 218.0\t~/project\t/home/antonio/project"
+    );
 }

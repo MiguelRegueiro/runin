@@ -119,15 +119,9 @@ Interactive flow:
 ```text
 runin config
 ────────────
-Search root [/home/user]:
->
-Default command [nvim .]:
->
 Directory source (zoxide/fd) [zoxide]:
 >
-Include root [n]:
->
-Include hidden paths [n]:
+Default command [nvim .]:
 >
 Change shell directory after run [y]:
 >
@@ -166,9 +160,9 @@ cd_after_run = true
 
 ```
 
-When `include_root = true`, the picker includes `search_root` itself as a selectable entry.
+When using `fd`, `include_root = true` adds `search_root` itself as a selectable entry, in addition to its subdirectories. For example, with `search_root = "$HOME/Documents"`, it adds `~/Documents` to the picker.
 
-`directory_source` chooses how directories are found. `zoxide` (the default) prioritizes directories you visit most; `fd` lists every directory under `search_root`. The `include_root` and `include_hidden` settings apply only to `fd`.
+`directory_source` chooses how directories are found. `zoxide` (the default) searches its full ranked directory history and shows frecency scores; `fd` lists every directory under `search_root`. Both display paths under your home directory with `~/`. The `search_root`, `include_root`, and `include_hidden` settings apply only to `fd`.
 
 Switch sources without opening the interactive setup:
 
@@ -177,7 +171,7 @@ runin config --directory-source fd
 runin config --directory-source zoxide
 ```
 
-For `zoxide` to learn your directory history, enable its shell integration as described in the [zoxide documentation](https://github.com/ajeetdsouza/zoxide#installation). `runin` uses `zoxide query --interactive --base-dir <search_root>`, so results remain inside your configured search root.
+For `zoxide` to learn your directory history, enable its shell integration as described in the [zoxide documentation](https://github.com/ajeetdsouza/zoxide#installation). `runin` sends zoxide's full ranked history to `fzf`, including zoxide-style frecency scores and a directory preview, while showing paths below your home directory with `~/`.
 
 When `cd_after_run = true`, `runin` changes the current shell to the selected directory after the command exits. This requires shell integration from `runin shell install`.
 
@@ -209,7 +203,7 @@ This keeps the terminal open in the selected directory after the configured comm
 ## How it works
 
 
-- Uses `zoxide query --interactive` by default to rank frequently used directories under `search_root`
+- Uses zoxide's full ranked directory history by default, then sends it to `fzf` for selection
 
 - Can instead use `fd` to list every directory under `search_root`
 
